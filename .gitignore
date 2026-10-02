@@ -41,3 +41,7 @@ example
 # generated native folders
 /ios
 /android
+
+# configuracion local de herramientas (Claude Code, Serena)
+.claude/
+.serena/
