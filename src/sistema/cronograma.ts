@@ -2,7 +2,7 @@
 // Toda la logica de armado del cronograma. Esto no tiene que saber nada
 // de React ni de AsyncStorage, solo recibe datos y devuelve datos.
 
-import { Paquete, Empresa, BloqueHorario, JornadaLaboral, RangoHorario, DiaSemana } from "../type/index";
+import { Paquete, Empresa, BloqueHorario, JornadaLaboral, RangoHorario, DiaSemana, Prioridad } from "../type/index";
 
 // ---------------------------------------------------------
 // Helpers de tiempo. Todo lo manejo en minutos desde medianoche
@@ -474,4 +474,36 @@ export function generarDiaUrgente(
     empresasAfectadas: Array.from(empresasAfectadas),
     bloquesPerdidos,
   };
+}
+
+// ---------------------------------------------------------
+// Agenda de un día: lo que muestra la pantalla de inicio.
+// No calcula nada nuevo, solo filtra el cronograma ya generado.
+// ---------------------------------------------------------
+
+export interface SesionDelDia {
+  bloque: BloqueHorario;
+  nombreEmpresa: string;
+  prioridad: Prioridad;
+}
+
+// Devuelve los bloques de esa fecha ordenados por hora de inicio, cada uno
+// con el nombre de su empresa. Si un bloque apunta a una empresa que ya no
+// existe (no debería pasar), se saltea.
+export function armarAgendaDelDia(
+  fechaISO: string,
+  bloques: BloqueHorario[],
+  empresas: Empresa[]
+): SesionDelDia[] {
+  const sesiones: SesionDelDia[] = [];
+  for (const bloque of bloques) {
+    if (bloque.fecha !== fechaISO) continue;
+    const empresa = empresas.find((e) => e.id === bloque.empresaId);
+    if (!empresa) continue;
+    sesiones.push({ bloque, nombreEmpresa: empresa.nombre, prioridad: empresa.prioridad });
+  }
+  // sort con comparador, como OrderBy en C#: negativo = a va antes que b
+  return sesiones.sort(
+    (a, b) => horaAMinutos(a.bloque.horaInicio) - horaAMinutos(b.bloque.horaInicio)
+  );
 }

@@ -4,7 +4,7 @@ Resumen del trabajo hecho hasta ahora: cómo está organizado el código, qué
 decisiones se tomaron, qué funciona y qué falta. Las reglas de negocio
 completas están en `CLAUDE.md`; acá va lo que se implementó y por qué.
 
-Última actualización: 2026-10-02.
+Última actualización: 2026-10-03.
 
 ---
 
@@ -13,7 +13,7 @@ completas están en `CLAUDE.md`; acá va lo que se implementó y por qué.
 ```
 src/
 ├── app/                        # pantallas (Expo Router)
-│   ├── index.tsx               # Cronograma (inicio) — todavía no muestra bloques
+│   ├── index.tsx               # Cronograma (inicio): los bloques de hoy
 │   ├── mis-empresas.tsx        # lista + switch de prioridad alta + eliminar
 │   ├── mis-paquetes.tsx        # lista + eliminar
 │   └── (modals)/
@@ -22,7 +22,7 @@ src/
 ├── components/
 │   └── boton-eliminar.tsx      # botón con confirmación en dos toques
 ├── sistema/                    # lógica de negocio pura (sin React ni storage)
-│   ├── cronograma.ts           # algoritmo: generación normal, x4, recálculo
+│   ├── cronograma.ts           # algoritmo: generación normal, x4, recálculo, agenda del día
 │   ├── prioridad.ts            # prender/apagar el switch de prioridad alta
 │   └── eliminacion.ts          # borrar empresas, validar borrado de paquetes
 ├── storage/
@@ -99,7 +99,21 @@ cierra en el medio.
 | Los bloques desplazados tenían un tope fijo de 30 días | Solo se mueven dentro de la ventana de su propia empresa |
 | La última sesión siempre era de tamaño completo | Puede ser más corta (15 h en bloques de 2 h → la última dura 1 h) |
 
-### 5. Cambios en el modelo de datos
+### 5. Pantalla de inicio (cronograma del día)
+- Muestra los bloques de hoy ordenados por hora, como tarjetas: horario
+  de inicio y fin, nombre de la empresa, duración y una etiqueta **ALTA**
+  si la empresa está en prioridad alta. Si no hay bloques, muestra "Sin
+  sesiones hoy".
+- No calcula nada: lee bloques y empresas del storage y llama a
+  `armarAgendaDelDia` (en `cronograma.ts`), que filtra por fecha y ordena.
+- Se recarga cada vez que la pantalla vuelve a estar visible
+  (`useFocusEffect`), así se ven enseguida los cambios hechos en los
+  modales o en Mis Empresas.
+- Cambio de día automático: un timer a la medianoche y, además, un
+  chequeo de la fecha cada vez que la app vuelve del segundo plano (en el
+  celular los timers se pausan con la app cerrada).
+
+### 6. Cambios en el modelo de datos
 - `Empresa.empresasDesplazadas?: string[]`: ids de las empresas que corrió
   mientras estuvo en alta, para saber a quién recalcular al apagar.
 
@@ -143,9 +157,21 @@ cambiar.
   - al apagar la primera, se calculan 8 h consumidas y las 22 h restantes se
     reparten hasta el día 27, sin superposiciones.
 
+- `npx expo lint` (2026-10-03): 1 error y 5 advertencias, ninguno en
+  código nuestro de `sistema/` ni en la pantalla de inicio:
+  - error en `src/hooks/use-color-scheme.web.ts` (archivo de la plantilla
+    de Expo, `setState` dentro de un `useEffect`);
+  - advertencias en los modales: `react` importado dos veces y un
+    `useEffect` sin usar en `AgregarPaquete`.
+
 **Sin verificar:**
-- No se probó en el celular (Expo Go).
-- No se corrió `npx expo lint` porque `eslint` no está instalado en el proyecto.
+- No se probó en el celular (Expo Go), tampoco la pantalla de inicio.
+
+### Entorno de desarrollo (esta PC)
+- Node.js 24 LTS instalado con `winget`; dependencias con `npm ci`.
+- `expo-env.d.ts` no está en git (lo genera `npx expo start`). Sin ese
+  archivo `tsc` falla con errores de los `.css` de la plantilla; si pasa
+  en una compu nueva, correr `npx expo start` una vez antes de `tsc`.
 
 ---
 
@@ -157,8 +183,6 @@ cambiar.
       existe). Hoy una empresa en alta solo recibe el bloque x4 del día en
       que se prendió el switch. También tiene que acumular las nuevas
       empresas desplazadas en `empresasDesplazadas`.
-- [ ] **Pantalla de inicio**: mostrar los bloques de hoy. Hoy muestra una
-      grilla vacía de 9 a 22 h.
 - [ ] **Pantalla de jornada laboral** (fija o variable), que usa
       `guardarJornada`.
 

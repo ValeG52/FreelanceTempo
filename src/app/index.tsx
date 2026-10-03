@@ -1,16 +1,97 @@
-// src/app/Inicio.tsx
-import React, { useState } from "react";
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView } from "react-native";
-import { useRouter } from "expo-router";
+// src/app/index.tsx — Cronograma (pantalla de inicio)
+// Muestra el recorte de HOY del cronograma ya generado. No calcula nada:
+// lee los bloques guardados y le pide a sistema/ los de la fecha de hoy.
+import React, { useState, useEffect, useCallback } from "react";
+import { View, Text, StyleSheet, TouchableOpacity, ScrollView, AppState } from "react-native";
+import { useRouter, useFocusEffect } from "expo-router";
+import { obtenerBloques, obtenerEmpresas } from "../storage/index";
+import { armarAgendaDelDia, fechaLocalISO, SesionDelDia } from "../sistema/cronograma";
 
+// Milisegundos que faltan hasta la próxima medianoche (hora local del celular)
+function msHastaMedianoche(ahora: Date): number {
+  const medianoche = new Date(ahora);
+  medianoche.setHours(24, 0, 0, 0); // hora 24 = 00:00 del día siguiente
+  return medianoche.getTime() - ahora.getTime();
+}
 
+// "09:00" - "11:30" → "2 H 30 MIN"
+function textoDuracion(horaInicio: string, horaFin: string): string {
+  const [hi, mi] = horaInicio.split(":").map(Number);
+  const [hf, mf] = horaFin.split(":").map(Number);
+  const minutos = hf * 60 + mf - (hi * 60 + mi);
+  const horas = Math.floor(minutos / 60);
+  const resto = minutos % 60;
+  if (resto === 0) return `${horas} h`;
+  if (horas === 0) return `${resto} min`;
+  return `${horas} h ${resto} min`;
+}
 
 const HomeScreen = () => {
   const router = useRouter();
   const [menuAbierto, setMenuAbierto] = useState(false);
 
-  const fechaActual = new Date();
-  const fechaFormateada = fechaActual.toLocaleDateString("es-AR", {
+  // "Hoy" como "YYYY-MM-DD". Es state para que la pantalla se redibuje sola
+  // cuando cambia el día.
+  const [fechaHoy, setFechaHoy] = useState<string>(fechaLocalISO(new Date()));
+  const [sesiones, setSesiones] = useState<SesionDelDia[]>([]);
+  const [cargando, setCargando] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // Lee del storage y arma la agenda de la fecha indicada
+  const cargarAgenda = useCallback(async (fecha: string) => {
+    try {
+      // Promise.all = Task.WhenAll en C#: las dos lecturas en paralelo
+      const [bloques, empresas] = await Promise.all([obtenerBloques(), obtenerEmpresas()]);
+      setSesiones(armarAgendaDelDia(fecha, bloques, empresas));
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "No se pudo leer el cronograma.");
+    } finally {
+      setCargando(false);
+    }
+  }, []);
+
+  // useFocusEffect corre cada vez que la pantalla vuelve a estar visible
+  // (por ej. al cerrar el modal de Agregar Empresa o volver de Mis Empresas),
+  // así siempre muestra los bloques recién guardados.
+  useFocusEffect(
+    useCallback(() => {
+      // por si la app quedó abierta de un día para el otro
+      const hoy = fechaLocalISO(new Date());
+      setFechaHoy(hoy);
+      cargarAgenda(hoy);
+    }, [cargarAgenda])
+  );
+
+  // Actualización automática cada día:
+  // 1) un timer que salta a la medianoche, y
+  // 2) al volver la app del segundo plano (en el celular los timers se
+  //    pausan cuando la app no está abierta, así que el 1 solo no alcanza).
+  useEffect(() => {
+    const revisarFecha = () => {
+      const hoy = fechaLocalISO(new Date());
+      // si la fecha no cambió, React no redibuja (mismo valor)
+      setFechaHoy(hoy);
+      cargarAgenda(hoy);
+    };
+
+    const timer = setTimeout(revisarFecha, msHastaMedianoche(new Date()) + 1000);
+    const suscripcion = AppState.addEventListener("change", (estado) => {
+      if (estado === "active") revisarFecha();
+    });
+
+    // la función que devuelve useEffect es la "limpieza" (como Dispose en C#)
+    return () => {
+      clearTimeout(timer);
+      suscripcion.remove();
+    };
+  }, [fechaHoy, cargarAgenda]); // al cambiar el día se vuelve a programar el timer
+
+  // Para mostrar la fecha armo el Date con año/mes/día locales
+  // (new Date("2026-10-02") sería UTC y en Argentina mostraría el día anterior)
+  const [anio, mes, dia] = fechaHoy.split("-").map(Number);
+  const fechaFormateada = new Date(anio, mes - 1, dia).toLocaleDateString("es-AR", {
+    weekday: "long",
     day: "2-digit",
     month: "short",
     year: "numeric",
@@ -22,8 +103,6 @@ const HomeScreen = () => {
     { label: "Mis Empresas", onPress: () => router.push("/mis-empresas") },
     { label: "Mis Paquetes", onPress: () => router.push("/mis-paquetes") },
   ];
-
-  const horas = Array.from({ length: 14 }, (_, index) => 9 + index);
 
   return (
     <View style={styles.container}>
@@ -66,10 +145,34 @@ const HomeScreen = () => {
         contentContainerStyle={styles.scheduleContent}
         showsVerticalScrollIndicator={false}
       >
-        {horas.map((hora) => (
-          <View key={hora} style={styles.hourRow}>
-            <Text style={styles.hourText}>{hora}:00</Text>
-            <View style={styles.slot} />
+        {error && <Text style={styles.avisoText}>{error}</Text>}
+
+        {!cargando && sesiones.length === 0 && (
+          <View style={styles.vacio}>
+            <Text style={styles.vacioTitulo}>Sin sesiones hoy</Text>
+            <Text style={styles.vacioTexto}>No hay bloques asignados para este día.</Text>
+          </View>
+        )}
+
+        {sesiones.map(({ bloque, nombreEmpresa, prioridad }) => (
+          <View key={bloque.id} style={styles.sesion}>
+            <View style={styles.sesionHorario}>
+              <Text style={styles.sesionHoraText}>{bloque.horaInicio}</Text>
+              <Text style={styles.sesionHoraFinText}>{bloque.horaFin}</Text>
+            </View>
+            <View style={styles.sesionInfo}>
+              <Text style={styles.sesionEmpresaText}>{nombreEmpresa}</Text>
+              <View style={styles.sesionDetalleRow}>
+                <Text style={styles.sesionDuracionText}>
+                  {textoDuracion(bloque.horaInicio, bloque.horaFin)}
+                </Text>
+                {prioridad === "alta" && (
+                  <View style={styles.pill}>
+                    <Text style={styles.pillText}>Alta</Text>
+                  </View>
+                )}
+              </View>
+            </View>
           </View>
         ))}
       </ScrollView>
@@ -174,16 +277,14 @@ const styles = StyleSheet.create({
   },
   scheduleContent: {
     paddingBottom: 20,
-  },
-  titleRow: {
-    display: "none",
+    paddingRight: 4, // deja ver la sombra offset de las tarjetas
   },
   pill: {
     backgroundColor: "#ffde59",
     borderWidth: 2,
     borderColor: "#111111",
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 2,
   },
   pillText: {
     color: "#111111",
@@ -192,35 +293,90 @@ const styles = StyleSheet.create({
     letterSpacing: 1.4,
     textTransform: "uppercase",
   },
-  hourRow: {
+  sesion: {
     flexDirection: "row",
-    alignItems: "center",
-    borderBottomWidth: 2,
-    borderBottomColor: "#111111",
-    paddingVertical: 10,
-    backgroundColor: "#f5f1e8",
+    borderWidth: 2,
+    borderColor: "#111111",
+    backgroundColor: "#ffffff",
+    marginBottom: 14,
+    shadowColor: "#000000",
+    shadowOffset: { width: 4, height: 4 },
+    shadowOpacity: 1,
+    shadowRadius: 0,
+    elevation: 4,
   },
-  hourText: {
-    width: 62,
-    color: "#111111",
+  sesionHorario: {
+    width: 78,
+    paddingVertical: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "#111111",
+  },
+  sesionHoraText: {
+    color: "#f5f1e8",
     fontSize: 16,
     fontWeight: "900",
   },
-  slot: {
+  sesionHoraFinText: {
+    color: "#bdbdbd",
+    fontSize: 13,
+    fontWeight: "700",
+    marginTop: 2,
+  },
+  sesionInfo: {
     flex: 1,
-    minHeight: 34,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
     justifyContent: "center",
-    borderLeftWidth: 2,
-    borderLeftColor: "#111111",
-    paddingLeft: 12,
+  },
+  sesionEmpresaText: {
+    color: "#111111",
+    fontSize: 16,
+    fontWeight: "900",
+    letterSpacing: 0.6,
+    textTransform: "uppercase",
+  },
+  sesionDetalleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginTop: 6,
+    gap: 8,
+  },
+  sesionDuracionText: {
+    color: "#4d4d4d",
+    fontSize: 12,
+    fontWeight: "700",
+    letterSpacing: 1,
+    textTransform: "uppercase",
+  },
+  vacio: {
+    borderWidth: 2,
+    borderColor: "#111111",
+    borderStyle: "dashed",
+    paddingVertical: 28,
+    paddingHorizontal: 16,
+    alignItems: "center",
     backgroundColor: "#ffffff",
   },
-  slotText: {
+  vacioTitulo: {
     color: "#111111",
-    fontSize: 14,
-    fontWeight: "800",
-    letterSpacing: 0.8,
+    fontSize: 16,
+    fontWeight: "900",
+    letterSpacing: 1,
     textTransform: "uppercase",
+  },
+  vacioTexto: {
+    color: "#4d4d4d",
+    fontSize: 13,
+    fontWeight: "600",
+    marginTop: 6,
+    textAlign: "center",
+  },
+  avisoText: {
+    color: "#b00020",
+    fontSize: 13,
+    fontWeight: "700",
+    marginBottom: 12,
   },
 });
 
