@@ -4,7 +4,7 @@ Resumen del trabajo hecho hasta ahora: cómo está organizado el código, qué
 decisiones se tomaron, qué funciona y qué falta. Las reglas de negocio
 completas están en `CLAUDE.md`; acá va lo que se implementó y por qué.
 
-Última actualización: 2026-10-03.
+Última actualización: 2026-10-05.
 
 ---
 
@@ -23,7 +23,7 @@ src/
 │   └── boton-eliminar.tsx      # botón con confirmación en dos toques
 ├── sistema/                    # lógica de negocio pura (sin React ni storage)
 │   ├── cronograma.ts           # algoritmo: generación normal, x4, recálculo, agenda del día
-│   ├── prioridad.ts            # prender/apagar el switch de prioridad alta
+│   ├── prioridad.ts            # prender/apagar el switch de prioridad alta, chequeo diario
 │   └── eliminacion.ts          # borrar empresas, validar borrado de paquetes
 ├── storage/
 │   └── index.ts                # AsyncStorage: paquetes, empresas, bloques, jornada
@@ -113,9 +113,33 @@ cierra en el medio.
   chequeo de la fecha cada vez que la app vuelve del segundo plano (en el
   celular los timers se pausan con la app cerrada).
 
-### 6. Cambios en el modelo de datos
+### 6. Chequeo diario de prioridad alta
+- Mientras el switch está prendido, cada día la empresa recibe su bloque
+  x4 (`aplicarChequeoDiario` en `prioridad.ts`).
+- Lo llama la pantalla de inicio cada vez que carga la agenda: al abrir la
+  app, al volver a la pantalla y a la medianoche. Si ese día ya se generó,
+  no hace nada y no guarda.
+- Las empresas en alta van en orden FIFO, y las que se corren se suman a
+  `empresasDesplazadas`.
+- **Excedente acumulado** (decisión del dueño, 2026-10-05): lo que no entra
+  en la jornada pasa al día siguiente y se suma al x4 de ese día, y así
+  sucesivamente, hasta que se apague el switch o se agoten las horas. El
+  x4 de cada día nunca pide más de lo que le queda del paquete (horas del
+  paquete menos todo lo ya agendado), así que el total nunca pasa del
+  paquete.
+- **Paquete agotado** (decisión del dueño, 2026-10-05): cuando la empresa
+  consumió todas sus horas, el chequeo diario le apaga el switch solo
+  (igual que apagarlo a mano: vuelve a media y las desplazadas vuelven a
+  su patrón habitual) y la pantalla de inicio muestra un aviso.
+
+### 7. Cambios en el modelo de datos
 - `Empresa.empresasDesplazadas?: string[]`: ids de las empresas que corrió
   mientras estuvo en alta, para saber a quién recalcular al apagar.
+- `Empresa.ultimoDiaUrgente?: string`: último día para el que ya se generó
+  el bloque x4. Se usa este campo, y no "tiene un bloque hoy", porque el
+  excedente del día anterior también cae en el día de hoy. Se borra al
+  apagar el switch. Las empresas en alta que no lo tienen usan el día en
+  que activaron el switch.
 
 ---
 
@@ -141,6 +165,14 @@ cambiar.
   empresa: las maneja su propio bloque x4.
 - **No se puede borrar un paquete en uso.** La alternativa (borrarlo junto
   con sus empresas) se descartó por ser destructiva.
+- **"Paquete agotado" usa la misma cuenta que las horas consumidas**
+  (bloques de hoy para atrás, incluido el de hoy): el switch se apaga a la
+  mañana del día de la última sesión, aunque esa sesión sea más tarde.
+- **El aviso de paquete agotado se muestra una sola vez**, en la carga de
+  la pantalla de inicio en que se apagó el switch.
+- **El chequeo diario no rellena días pasados.** Si la app no se abrió
+  durante algunos días, solo se genera el x4 de hoy: poner bloques en días
+  que ya pasaron correría a otras empresas en el pasado.
 
 ---
 
@@ -164,8 +196,17 @@ cambiar.
   - advertencias en los modales: `react` importado dos veces y un
     `useEffect` sin usar en `AgregarPaquete`.
 
-**Sin verificar:**
-- No se probó en el celular (Expo Go), tampoco la pantalla de inicio.
+- La pantalla de inicio se probó en el celular (Expo Go) el 2026-10-05 y
+  funciona bien.
+- El chequeo diario se probó fuera del celular (2026-10-05) con las
+  mismas 3 empresas: genera el x4 una vez por día, si se llama dos veces
+  no repite, no rellena días salteados, respeta FIFO, no deja bloques
+  superpuestos y al apagar el switch ya no genera más. Falta probarlo en
+  el celular.
+- Excedente y paquete agotado (2026-10-05): una empresa de 30 h en alta
+  (x4 = 12 h, jornada de 9 h) agenda 8 h + 9 h + 9 h + 4 h, el total
+  queda exactamente en 30 h y el switch se apaga solo el día de la última
+  sesión, sin superposiciones.
 
 ### Entorno de desarrollo (esta PC)
 - Node.js 24 LTS instalado con `winget`; dependencias con `npm ci`.
@@ -178,11 +219,6 @@ cambiar.
 ## Qué falta
 
 ### Para que el cronograma funcione de punta a punta
-- [ ] **Chequeo diario**: llamar a `generarDiaUrgente` una vez por día para
-      cada empresa en alta, en orden FIFO (`empresasEnAltaPorOrdenFIFO` ya
-      existe). Hoy una empresa en alta solo recibe el bloque x4 del día en
-      que se prendió el switch. También tiene que acumular las nuevas
-      empresas desplazadas en `empresasDesplazadas`.
 - [ ] **Pantalla de jornada laboral** (fija o variable), que usa
       `guardarJornada`.
 

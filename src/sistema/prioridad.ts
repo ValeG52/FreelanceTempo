@@ -4,7 +4,7 @@
 // Recibe datos y devuelve datos NUEVOS (no modifica los originales).
 
 import { Empresa, Paquete, BloqueHorario, JornadaLaboral } from "../type/index";
-import { fechaLocalISO, generarDiaUrgente, recalcularEmpresa } from "./cronograma";
+import { calcularHorasConsumidas, fechaLocalISO, generarDiaUrgente, recalcularEmpresa } from "./cronograma";
 
 // Prende el switch. Guardo la fecha y HORA exacta de activación (ISO completo,
 // no solo "YYYY-MM-DD") porque es lo que define el orden FIFO entre varias
@@ -30,7 +30,12 @@ export function desactivarPrioridadAltaEmpresa(empresa: Empresa): Empresa {
 
   // saco esos campos del objeto con desestructuración: las variables con "_"
   // se quedan con los campos descartados y "resto" con todo lo demás
-  const { fechaActivacionPrioridad: _fecha, empresasDesplazadas: _desplazadas, ...resto } = empresa;
+  const {
+    fechaActivacionPrioridad: _fecha,
+    empresasDesplazadas: _desplazadas,
+    ultimoDiaUrgente: _ultimoDia,
+    ...resto
+  } = empresa;
   return { ...resto, prioridad: "media" };
 }
 
@@ -95,7 +100,12 @@ export function aplicarActivacionAlta(
     paquetes
   );
 
-  const final: Empresa = { ...activada, empresasDesplazadas: resultado.empresasAfectadas };
+  // ultimoDiaUrgente = hoy: el x4 de hoy ya está, así el chequeo diario no lo repite
+  const final: Empresa = {
+    ...activada,
+    empresasDesplazadas: resultado.empresasAfectadas,
+    ultimoDiaUrgente: fechaHoy,
+  };
   return {
     empresas: reemplazarEmpresa(empresas, final),
     bloques: resultado.bloques,
@@ -117,9 +127,24 @@ export function aplicarDesactivacionAlta(
   bloques: BloqueHorario[],
   ahora: Date
 ): ResultadoDesactivacionAlta {
+  return desactivarAltaEnFecha(empresa, empresas, paquetes, jornada, bloques, fechaLocalISO(ahora));
+}
+
+/**
+ * Lo que hace apagar el switch, con la fecha de hoy ya como texto
+ * ("YYYY-MM-DD"). La usan el switch manual (aplicarDesactivacionAlta) y el
+ * apagado automático del chequeo diario cuando se agota el paquete.
+ */
+function desactivarAltaEnFecha(
+  empresa: Empresa,
+  empresas: Empresa[],
+  paquetes: Paquete[],
+  jornada: JornadaLaboral,
+  bloques: BloqueHorario[],
+  fechaHoy: string
+): ResultadoDesactivacionAlta {
   if (empresa.prioridad === "media") return { empresas, bloques, empresasSinCupo: [] };
 
-  const fechaHoy = fechaLocalISO(ahora);
   const apagada = desactivarPrioridadAltaEmpresa(empresa);
   let listaEmpresas = reemplazarEmpresa(empresas, apagada);
   let listaBloques = bloques;
@@ -143,4 +168,131 @@ export function aplicarDesactivacionAlta(
   }
 
   return { empresas: listaEmpresas, bloques: listaBloques, empresasSinCupo };
+}
+
+// ---------------------------------------------------------
+// Chequeo diario: mientras el switch esté prendido, cada día la empresa
+// recibe su bloque x4. Se llama al abrir la app y al cambiar el día.
+// ---------------------------------------------------------
+
+export interface ResultadoChequeoDiario {
+  empresas: Empresa[];
+  bloques: BloqueHorario[];
+  bloquesPerdidos: BloqueHorario[]; // bloques de otras empresas que no se pudieron reubicar
+  empresasFinalizadas: Empresa[];   // las que agotaron su paquete y se les apagó el switch solo
+  empresasSinCupo: Empresa[];       // desplazadas que no se pudieron recalcular al apagarse una
+  huboCambios: boolean;             // false = no había nada que generar, no hace falta guardar
+}
+
+/**
+ * true si la empresa ya consumió todas las horas de su paquete
+ * (sus bloques de hoy para atrás suman lo mismo que el paquete o más).
+ * Comparo en minutos enteros para no tener problemas de decimales.
+ */
+function paqueteAgotado(empresa: Empresa, paquete: Paquete, bloques: BloqueHorario[], fechaHoy: string): boolean {
+  const minutosConsumidos = Math.round(calcularHorasConsumidas(empresa.id, bloques, fechaHoy) * 60);
+  return minutosConsumidos >= paquete.horas * 60;
+}
+
+/**
+ * Último día para el que la empresa ya tiene generado su bloque x4.
+ * Las empresas que se pusieron en alta antes de que existiera el campo
+ * `ultimoDiaUrgente` usan el día en que activaron el switch (ese día sí
+ * se les generó el x4).
+ */
+function ultimoDiaConX4(empresa: Empresa): string | null {
+  if (empresa.ultimoDiaUrgente) return empresa.ultimoDiaUrgente;
+  if (empresa.fechaActivacionPrioridad) return fechaLocalISO(new Date(empresa.fechaActivacionPrioridad));
+  return null;
+}
+
+/**
+ * Genera el bloque x4 de hoy para cada empresa en prioridad alta que todavía
+ * no lo tenga. Se puede llamar todas las veces que se quiera en el mismo día:
+ * la segunda vez no hace nada (huboCambios: false).
+ *
+ * - Si una empresa ya consumió todas las horas de su paquete, se le apaga el
+ *   switch solo (igual que apagarlo a mano: vuelve a media y las que corrió
+ *   vuelven a su patrón habitual) y se devuelve en `empresasFinalizadas`.
+ * - El excedente de días anteriores se va sumando, pero generarDiaUrgente
+ *   nunca agenda más horas de las que le quedan del paquete.
+ * - Van en orden FIFO: la que activó el switch primero elige lugar primero.
+ * - Solo genera el día de HOY. Si la app no se abrió algunos días, esos días
+ *   no se rellenan: poner bloques en el pasado correría a otras empresas en
+ *   días que ya pasaron.
+ * - Las empresas que corre se suman a `empresasDesplazadas`, para que al
+ *   apagar el switch vuelvan a su patrón habitual.
+ * @param fechaHoy día de hoy, "YYYY-MM-DD"
+ * @returns las listas completas ya actualizadas, listas para guardar
+ */
+export function aplicarChequeoDiario(
+  empresas: Empresa[],
+  paquetes: Paquete[],
+  jornada: JornadaLaboral,
+  bloques: BloqueHorario[],
+  fechaHoy: string
+): ResultadoChequeoDiario {
+  let listaEmpresas = empresas;
+  let listaBloques = bloques;
+  const bloquesPerdidos: BloqueHorario[] = [];
+  const empresasFinalizadas: Empresa[] = [];
+  const empresasSinCupo: Empresa[] = [];
+  let huboCambios = false;
+
+  for (const enAlta of empresasEnAltaPorOrdenFIFO(empresas)) {
+    // busco la versión actualizada de la empresa (una anterior en la fila
+    // pudo haberla cambiado) y el estado actual de los bloques
+    const actual = listaEmpresas.find((e) => e.id === enAlta.id) ?? enAlta;
+    const paquete = buscarPaquete(paquetes, actual);
+
+    // 1) ¿Ya consumió todo el paquete? → se apaga el switch solo
+    if (paqueteAgotado(actual, paquete, listaBloques, fechaHoy)) {
+      const apagado = desactivarAltaEnFecha(actual, listaEmpresas, paquetes, jornada, listaBloques, fechaHoy);
+      listaEmpresas = apagado.empresas;
+      listaBloques = apagado.bloques;
+      empresasFinalizadas.push(actual);
+      // la que se apaga tiene 0 horas restantes, así que acá solo pueden
+      // aparecer desplazadas que no volvieron a entrar
+      empresasSinCupo.push(...apagado.empresasSinCupo.filter((e) => e.id !== actual.id));
+      huboCambios = true;
+      continue; // "continue" pasa a la siguiente empresa de la fila
+    }
+
+    // 2) ¿Ya tiene el x4 de hoy? → no hago nada
+    const ultimoDia = ultimoDiaConX4(actual);
+    if (ultimoDia !== null && ultimoDia >= fechaHoy) continue;
+
+    // 3) Le genero el x4 de hoy
+    const resultado = generarDiaUrgente(
+      actual,
+      paquete,
+      fechaHoy,
+      jornada,
+      listaBloques,
+      listaEmpresas,
+      paquetes
+    );
+
+    // new Set(...) junta las dos listas sin repetidos (como Union en LINQ)
+    const desplazadas = Array.from(
+      new Set([...(actual.empresasDesplazadas ?? []), ...resultado.empresasAfectadas])
+    );
+    listaEmpresas = reemplazarEmpresa(listaEmpresas, {
+      ...actual,
+      empresasDesplazadas: desplazadas,
+      ultimoDiaUrgente: fechaHoy,
+    });
+    listaBloques = resultado.bloques;
+    bloquesPerdidos.push(...resultado.bloquesPerdidos);
+    huboCambios = true;
+  }
+
+  return {
+    empresas: listaEmpresas,
+    bloques: listaBloques,
+    bloquesPerdidos,
+    empresasFinalizadas,
+    empresasSinCupo,
+    huboCambios,
+  };
 }

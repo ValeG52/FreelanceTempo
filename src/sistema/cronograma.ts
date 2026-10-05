@@ -402,7 +402,19 @@ export function generarDiaUrgente(
   empresas: Empresa[],
   paquetes: Paquete[]
 ): ResultadoDiaUrgente {
-  const minutosNecesarios = calcularTamanoBloque(paquete.horas) * 4 * 60;
+  // Nunca pido más de lo que le queda del paquete: horas del paquete menos
+  // TODO lo que ya tiene agendado (lo consumido + lo que quedó para días
+  // siguientes por excedentes anteriores). Así el excedente se va sumando
+  // día a día, pero se corta cuando se agotan las horas.
+  const minutosAgendados = todosLosBloques
+    .filter((b) => b.empresaId === empresa.id)
+    .reduce((total, b) => total + duracionEnMinutos(b), 0);
+  const minutosQueLeQuedan = paquete.horas * 60 - minutosAgendados;
+  const minutosNecesarios = Math.min(calcularTamanoBloque(paquete.horas) * 4 * 60, minutosQueLeQuedan);
+  if (minutosNecesarios <= 0) {
+    // ya tiene todas sus horas agendadas: no genero nada
+    return { bloques: todosLosBloques, empresasAfectadas: [], bloquesPerdidos: [] };
+  }
 
   // FIFO: las que activaron alta ANTES que esta no se pueden correr
   const miActivacion = empresa.fechaActivacionPrioridad ?? "9999";
@@ -481,15 +493,23 @@ export function generarDiaUrgente(
 // No calcula nada nuevo, solo filtra el cronograma ya generado.
 // ---------------------------------------------------------
 
+/** Una sesión de la agenda del día: el bloque más los datos de su empresa que muestra la pantalla. */
 export interface SesionDelDia {
-  bloque: BloqueHorario;
-  nombreEmpresa: string;
-  prioridad: Prioridad;
+  bloque: BloqueHorario;   // el bloque horario tal como está guardado
+  nombreEmpresa: string;   // para mostrar en la tarjeta
+  prioridad: Prioridad;    // para mostrar la etiqueta "ALTA"
 }
 
-// Devuelve los bloques de esa fecha ordenados por hora de inicio, cada uno
-// con el nombre de su empresa. Si un bloque apunta a una empresa que ya no
-// existe (no debería pasar), se saltea.
+/**
+ * Arma la agenda de un día a partir del cronograma ya generado: filtra los
+ * bloques de esa fecha, les suma el nombre y la prioridad de su empresa, y
+ * los ordena por hora de inicio. No crea ni mueve bloques.
+ * Si un bloque apunta a una empresa que ya no existe (no debería pasar), se saltea.
+ * @param fechaISO día a mostrar, "YYYY-MM-DD"
+ * @param bloques todos los bloques guardados
+ * @param empresas todas las empresas guardadas
+ * @returns las sesiones de ese día, de la más temprana a la más tarde
+ */
 export function armarAgendaDelDia(
   fechaISO: string,
   bloques: BloqueHorario[],

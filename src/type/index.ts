@@ -17,6 +17,7 @@ export interface Empresa {
   horasConsumidas: number;           // cuántas horas del paquete ya se "gastaron"
   fechaActivacionPrioridad?: string; // solo tiene valor si prioridad === "alta"
   empresasDesplazadas?: string[];    // ids de las empresas que corrió mientras estuvo en alta
+  ultimoDiaUrgente?: string;         // último día ("YYYY-MM-DD") para el que ya se generó su bloque x4
 }
 
 export interface BloqueHorario {

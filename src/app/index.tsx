@@ -4,17 +4,41 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, AppState } from "react-native";
 import { useRouter, useFocusEffect } from "expo-router";
-import { obtenerBloques, obtenerEmpresas } from "../storage/index";
-import { armarAgendaDelDia, fechaLocalISO, SesionDelDia } from "../sistema/cronograma";
+import {
+  obtenerBloques,
+  obtenerEmpresas,
+  obtenerPaquetes,
+  obtenerJornada,
+  guardarEmpresasYBloques,
+} from "../storage/index";
+import {
+  armarAgendaDelDia,
+  fechaLocalISO,
+  JORNADA_POR_DEFECTO,
+  SesionDelDia,
+} from "../sistema/cronograma";
+import { aplicarChequeoDiario } from "../sistema/prioridad";
 
-// Milisegundos que faltan hasta la próxima medianoche (hora local del celular)
+/**
+ * Calcula cuánto falta para que cambie el día (medianoche, hora local del celular).
+ * Se usa para programar el timer que actualiza la pantalla a las 00:00.
+ * @param ahora momento actual
+ * @returns milisegundos que faltan hasta la próxima medianoche
+ */
 function msHastaMedianoche(ahora: Date): number {
   const medianoche = new Date(ahora);
   medianoche.setHours(24, 0, 0, 0); // hora 24 = 00:00 del día siguiente
   return medianoche.getTime() - ahora.getTime();
 }
 
-// "09:00" - "11:30" → "2 H 30 MIN"
+/**
+ * Arma el texto de duración de un bloque para mostrar en la tarjeta.
+ * Ejemplos: "09:00"-"11:00" → "2 h" · "09:00"-"11:30" → "2 h 30 min" · "09:00"-"09:45" → "45 min".
+ * (En pantalla se ve en mayúsculas por el estilo, no por esta función.)
+ * @param horaInicio hora de inicio "HH:MM"
+ * @param horaFin hora de fin "HH:MM"
+ * @returns la duración en texto
+ */
 function textoDuracion(horaInicio: string, horaFin: string): string {
   const [hi, mi] = horaInicio.split(":").map(Number);
   const [hf, mf] = horaFin.split(":").map(Number);
@@ -26,6 +50,11 @@ function textoDuracion(horaInicio: string, horaFin: string): string {
   return `${horas} h ${resto} min`;
 }
 
+/**
+ * Pantalla de inicio (Cronograma): muestra las sesiones de hoy ordenadas por
+ * hora, con el menú para ir a las demás pantallas. Se recarga al volver a
+ * la pantalla y cambia de día sola a la medianoche.
+ */
 const HomeScreen = () => {
   const router = useRouter();
   const [menuAbierto, setMenuAbierto] = useState(false);
@@ -37,13 +66,53 @@ const HomeScreen = () => {
   const [cargando, setCargando] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Lee del storage y arma la agenda de la fecha indicada
+  /**
+   * Lee todo del storage, corre el chequeo diario (genera el bloque x4 de hoy
+   * a las empresas en prioridad alta que todavía no lo tengan, y guarda si
+   * hubo cambios), y después arma la agenda de esa fecha en el state
+   * `sesiones` (eso redibuja la lista).
+   * Si algo falla, o el chequeo tiene algo que avisar (prioridad apagada por
+   * paquete agotado, sesiones que no se pudieron reubicar), deja el mensaje
+   * en `error`.
+   * useCallback hace que la función sea siempre la misma entre renders,
+   * para poder ponerla en las dependencias de los efectos sin que se repitan.
+   * @param fecha día a mostrar, "YYYY-MM-DD"
+   */
   const cargarAgenda = useCallback(async (fecha: string) => {
     try {
-      // Promise.all = Task.WhenAll en C#: las dos lecturas en paralelo
-      const [bloques, empresas] = await Promise.all([obtenerBloques(), obtenerEmpresas()]);
-      setSesiones(armarAgendaDelDia(fecha, bloques, empresas));
-      setError(null);
+      // Promise.all = Task.WhenAll en C#: las cuatro lecturas en paralelo
+      const [empresasGuardadas, paquetes, bloquesGuardados, jornadaGuardada] = await Promise.all([
+        obtenerEmpresas(),
+        obtenerPaquetes(),
+        obtenerBloques(),
+        obtenerJornada(),
+      ]);
+      const jornada = jornadaGuardada ?? JORNADA_POR_DEFECTO;
+
+      // la regla vive en sistema/: si hoy ya se generó todo, no cambia nada
+      const chequeo = aplicarChequeoDiario(empresasGuardadas, paquetes, jornada, bloquesGuardados, fecha);
+      if (chequeo.huboCambios) {
+        await guardarEmpresasYBloques(chequeo.empresas, chequeo.bloques);
+      }
+
+      setSesiones(armarAgendaDelDia(fecha, chequeo.bloques, chequeo.empresas));
+
+      // junto los avisos del chequeo en un solo texto (null = no mostrar nada)
+      const avisos: string[] = [];
+      if (chequeo.empresasFinalizadas.length > 0) {
+        const nombres = chequeo.empresasFinalizadas.map((e) => e.nombre).join(", ");
+        avisos.push(`${nombres} consumió todas las horas del paquete: se apagó la prioridad alta.`);
+      }
+      if (chequeo.empresasSinCupo.length > 0) {
+        const nombres = chequeo.empresasSinCupo.map((e) => e.nombre).join(", ");
+        avisos.push(`No hay cupos para recalcular: ${nombres}. Quedaron con su horario anterior.`);
+      }
+      if (chequeo.bloquesPerdidos.length > 0) {
+        avisos.push(
+          `${chequeo.bloquesPerdidos.length} sesión(es) de otras empresas no entraron en su ventana y se quitaron del cronograma.`
+        );
+      }
+      setError(avisos.length > 0 ? avisos.join("\n") : null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "No se pudo leer el cronograma.");
     } finally {
@@ -68,6 +137,10 @@ const HomeScreen = () => {
   // 2) al volver la app del segundo plano (en el celular los timers se
   //    pausan cuando la app no está abierta, así que el 1 solo no alcanza).
   useEffect(() => {
+    /**
+     * Toma la fecha de hoy del reloj del celular, la guarda en el state y
+     * recarga la agenda. La llaman el timer de medianoche y el AppState.
+     */
     const revisarFecha = () => {
       const hoy = fechaLocalISO(new Date());
       // si la fecha no cambió, React no redibuja (mismo valor)
