@@ -1,189 +1,121 @@
-// src/app/(modals)/AgregarPaquete.tsx
-import React from "react";
-import { View, Text, StyleSheet, TextInput, TouchableOpacity } from "react-native";
+// src/app/(modals)/AgregarPaquete.tsx — modal para crear un paquete de horas
+import React, { useState } from "react";
+import { View, Text, StyleSheet } from "react-native";
 import { guardarPaquete } from "../../storage/index";
-import { useState, useEffect } from "react";
-import { router } from "expo-router/build/global-state/router";
+import { tamanoBloqueMinutos, diasDeVentana, fechaLocalISO } from "../../sistema/cronograma";
+import { textoHoras } from "../../components/formato";
+import { Paquete } from "../../type";
+import {
+  Pantalla,
+  Campo,
+  Selector,
+  Boton,
+  BotonIcono,
+  Tarjeta,
+  cerrarPantalla,
+  colores,
+  espacio,
+  tipo,
+} from "../../components/kit";
 
-
-const AgregarPaquete = ({ onClose }: { onClose: () => void }) => {
+/**
+ * Modal Agregar Paquete: nombre, horas y período (semana o mes).
+ * Muestra de qué tamaño van a ser las sesiones antes de guardar.
+ */
+const AgregarPaquete = () => {
   const [nombre, setNombre] = useState("");
   const [horas, setHoras] = useState("");
-  const [periodo, setPeriodo] = useState<"semana" | "mes">("semana");
+  const [periodo, setPeriodo] = useState<"semana" | "mes">("semana"); // solo puede valer "semana" o "mes"
+  const [guardando, setGuardando] = useState(false);
 
-  const GuardarPaquete = async () => {
-    const nuevoPaquete = {
-      id: Date.now().toString(),
-      nombre,
-      horas: Number(horas),
-      periodo,
-    };
-    await guardarPaquete(nuevoPaquete);
-    //onClose();
-    router.replace("/mis-paquetes");
+  // lo que se escribe es texto: Number(...) lo pasa a número (como double.Parse, pero sin excepción)
+  const horasNumero = Number(horas.replace(",", ".")); // acepta "10,5" además de "10.5"
+  // isFinite = es un número de verdad (Number("hola") da NaN, que no lo es)
+  const valido = nombre.trim() !== "" && Number.isFinite(horasNumero) && horasNumero > 0;
+
+  /** Guarda el paquete nuevo y cierra el modal. */
+  const guardar = async () => {
+    if (!valido) return;
+    setGuardando(true);
+    try {
+      const nuevoPaquete: Paquete = {
+        id: Date.now().toString(),
+        nombre: nombre.trim(),
+        horas: horasNumero,
+        periodo,
+      };
+      await guardarPaquete(nuevoPaquete);
+      cerrarPantalla("/mis-paquetes");
+    } finally {
+      setGuardando(false);
+    }
   };
 
   return (
-    <View style={styles.container}>
-      <View style={styles.card}>
-        <Text style={styles.titulo}>AGREGAR PAQUETE</Text>
-        <TextInput
-          style={styles.input}
-          placeholder="Nombre"
-          placeholderTextColor="#6b6b6b"
-          value={nombre}
-          onChangeText={setNombre}
+    <Pantalla
+      antetitulo="Nuevo"
+      titulo="Paquete"
+      conTabs={false}
+      accion={
+        <BotonIcono
+          icono={{ ios: "xmark", android: "close", web: "close" }}
+          etiquetaAccesible="Cerrar"
+          onPress={() => cerrarPantalla("/mis-paquetes")}
         />
-        <TextInput
-          style={styles.input}
-          placeholder="Horas"
-          placeholderTextColor="#6b6b6b"
-          value={horas}
-          onChangeText={setHoras}
-          keyboardType="numeric"
-        />
+      }
+    >
+      <Campo etiqueta="Nombre" placeholder="Ej. Soporte mensual" value={nombre} onChangeText={setNombre} />
+      <Campo
+        etiqueta="Horas"
+        placeholder="Ej. 20"
+        value={horas}
+        onChangeText={setHoras}
+        keyboardType="numeric"
+      />
 
-        <View style={styles.toggleWrap}>
-          <TouchableOpacity
-            style={[styles.toggleButton, periodo === "semana" && styles.toggleButtonActive]}
-            onPress={() => setPeriodo("semana")}
-          >
-            <Text style={[styles.toggleText, periodo === "semana" && styles.toggleTextActive]}>
-              SEMANA
-            </Text>
-          </TouchableOpacity>
+      <Text style={[tipo.etiqueta, styles.etiqueta]}>PERÍODO</Text>
+      <Selector<"semana" | "mes">
+        opciones={[
+          { valor: "semana", texto: "SEMANA" },
+          { valor: "mes", texto: "MES" },
+        ]}
+        valor={periodo}
+        onCambiar={setPeriodo}
+      />
 
-          <TouchableOpacity
-            style={[styles.toggleButton, periodo === "mes" && styles.toggleButtonActive]}
-            onPress={() => setPeriodo("mes")}
-          >
-            <Text style={[styles.toggleText, periodo === "mes" && styles.toggleTextActive]}>
-              MES
-            </Text>
-          </TouchableOpacity>
-        </View>
+      {/* vista previa: cómo se va a repartir */}
+      {valido && (
+        <Tarjeta fondo={colores.hundido} conSombra={false} style={styles.previa} estiloInterno={styles.previaInterna}>
+          <Text style={tipo.cuerpo}>
+            Sesiones de {periodo === "mes" ? "≈" : ""}
+            {textoHoras(tamanoBloqueMinutos({ id: "", nombre, horas: horasNumero, periodo }, fechaLocalISO(new Date())) / 60)}
+            , una por día hábil (lunes a viernes) en los {diasDeVentana(periodo)} días de cada ventana. Se
+            renueva sola al terminar.
+          </Text>
+        </Tarjeta>
+      )}
 
-        <View style={styles.buttonGroup}>
-          <TouchableOpacity style={styles.primaryButton} onPress={GuardarPaquete}>
-            <Text style={styles.primaryButtonText}>GUARDADO</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.secondaryButton} onPress={() => router.push("/")}>
-            <Text style={styles.secondaryButtonText}>CERRAR</Text>
-          </TouchableOpacity>
-        </View>
+      <View style={styles.botones}>
+        <Boton texto="Guardar paquete" onPress={guardar} disabled={!valido || guardando} />
+        <Boton texto="Cancelar" variante="secundario" onPress={() => cerrarPantalla("/mis-paquetes")} />
       </View>
-    </View>
+    </Pantalla>
   );
 };
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    width: "100%",
-    maxWidth: 430,
-    alignSelf: "center",
-    padding: 20,
-    backgroundColor: "#f5f1e8",
-    justifyContent: "center",
+  etiqueta: {
+    marginBottom: 6,
   },
-  card: {
-    width: "100%",
-    backgroundColor: "#ffffff",
-    borderWidth: 2,
-    borderColor: "#111111",
-    padding: 18,
-    shadowColor: "#000000",
-    shadowOffset: { width: 5, height: 5 },
-    shadowOpacity: 1,
-    shadowRadius: 0,
-    elevation: 8,
+  previa: {
+    marginTop: espacio.l,
   },
-  titulo: {
-    fontSize: 24,
-    fontWeight: "900",
-    marginBottom: 20,
-    color: "#111111",
-    textAlign: "center",
-    letterSpacing: 1,
+  previaInterna: {
+    padding: espacio.m,
   },
-  input: {
-    height: 46,
-    borderWidth: 2,
-    borderColor: "#111111",
-    backgroundColor: "#f5f1e8",
-    marginBottom: 12,
-    paddingHorizontal: 12,
-    color: "#111111",
-    fontWeight: "700",
-  },
-  toggleWrap: {
-    flexDirection: "row",
-    marginBottom: 12,
-    borderWidth: 2,
-    borderColor: "#111111",
-    backgroundColor: "#f5f1e8",
-    overflow: "hidden",
-  },
-  toggleButton: {
-    flex: 1,
-    paddingVertical: 12,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#f5f1e8",
-    borderRightWidth: 2,
-    borderRightColor: "#111111",
-  },
-  toggleButtonActive: {
-    backgroundColor: "#111111",
-  },
-  toggleText: {
-    color: "#111111",
-    fontSize: 12,
-    fontWeight: "900",
-    letterSpacing: 1.2,
-  },
-  toggleTextActive: {
-    color: "#f5f1e8",
-  },
-  buttonGroup: {
-    gap: 10,
-    marginTop: 8,
-  },
-  primaryButton: {
-    backgroundColor: "#111111",
-    borderWidth: 2,
-    borderColor: "#111111",
-    paddingVertical: 12,
-    alignItems: "center",
-    shadowColor: "#000000",
-    shadowOffset: { width: 4, height: 4 },
-    shadowOpacity: 1,
-    shadowRadius: 0,
-    elevation: 6,
-  },
-  primaryButtonText: {
-    color: "#f5f1e8",
-    fontSize: 14,
-    fontWeight: "900",
-    letterSpacing: 1.2,
-  },
-  secondaryButton: {
-    backgroundColor: "#ffde59",
-    borderWidth: 2,
-    borderColor: "#111111",
-    paddingVertical: 12,
-    alignItems: "center",
-    shadowColor: "#000000",
-    shadowOffset: { width: 4, height: 4 },
-    shadowOpacity: 1,
-    shadowRadius: 0,
-    elevation: 6,
-  },
-  secondaryButtonText: {
-    color: "#111111",
-    fontSize: 14,
-    fontWeight: "900",
-    letterSpacing: 1.2,
+  botones: {
+    gap: espacio.m,
+    marginTop: espacio.xl,
   },
 });
 

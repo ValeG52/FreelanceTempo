@@ -4,7 +4,7 @@ Resumen del trabajo hecho hasta ahora: cómo está organizado el código, qué
 decisiones se tomaron, qué funciona y qué falta. Las reglas de negocio
 completas están en `CLAUDE.md`; acá va lo que se implementó y por qué.
 
-Última actualización: 2026-10-05.
+Última actualización: 2026-10-06.
 
 ---
 
@@ -13,18 +13,33 @@ completas están en `CLAUDE.md`; acá va lo que se implementó y por qué.
 ```
 src/
 ├── app/                        # pantallas (Expo Router)
-│   ├── index.tsx               # Cronograma (inicio): los bloques de hoy
-│   ├── mis-empresas.tsx        # lista + switch de prioridad alta + eliminar
-│   ├── mis-paquetes.tsx        # lista + eliminar
+│   ├── _layout.tsx             # raíz: carga fuentes, Stack con (tabs), modales y jornada
+│   ├── (tabs)/                 # barra de pestañas de abajo
+│   │   ├── _layout.tsx         # Hoy · Calendario · Empresas · Paquetes
+│   │   ├── index.tsx           # Hoy: resumen y sesiones del día (+ chequeo diario)
+│   │   ├── calendario.tsx      # vista semana / mes del cronograma completo
+│   │   ├── mis-empresas.tsx    # lista + progreso + switch de prioridad alta + eliminar
+│   │   └── mis-paquetes.tsx    # lista + eliminar
+│   ├── jornada.tsx             # jornada laboral (se abre con el ⚙ de Hoy)
 │   └── (modals)/
 │       ├── AgregarEmpresa.tsx  # crea la empresa y genera su cronograma
-│       └── AgregarPaquete.tsx
+│       ├── AgregarPaquete.tsx
+│       └── NotaSesion.tsx      # escribir la nota de una sesión (desde Hoy)
 ├── components/
+│   ├── kit/                    # sistema de diseño "brutalista refinado"
+│   │   ├── tema.ts             # colores, fuentes, espaciados, color por empresa
+│   │   └── index.tsx           # Pantalla, Tarjeta, Boton, Etiqueta, Aviso, Selector, Campo...
+│   ├── tarjeta-sesion.tsx      # tarjeta de una sesión (Hoy y Calendario)
+│   ├── formato.ts              # fechas y duraciones en español
 │   └── boton-eliminar.tsx      # botón con confirmación en dos toques
 ├── sistema/                    # lógica de negocio pura (sin React ni storage)
 │   ├── cronograma.ts           # algoritmo: generación normal, x4, recálculo, agenda del día
 │   ├── prioridad.ts            # prender/apagar el switch de prioridad alta, chequeo diario
-│   └── eliminacion.ts          # borrar empresas, validar borrado de paquetes
+│   ├── eliminacion.ts          # borrar empresas, validar borrado de paquetes
+│   ├── jornada.ts              # validar y convertir la jornada laboral
+│   ├── renovacion.ts           # renovar el paquete al terminar la ventana
+│   ├── notas.ts                # poner / borrar la nota de una sesión
+│   └── calendario.ts           # fechas de semana/mes y agenda de varios días
 ├── storage/
 │   └── index.ts                # AsyncStorage: paquetes, empresas, bloques, jornada
 └── type/
@@ -132,7 +147,123 @@ cierra en el medio.
   (igual que apagarlo a mano: vuelve a media y las desplazadas vuelven a
   su patrón habitual) y la pantalla de inicio muestra un aviso.
 
-### 7. Cambios en el modelo de datos
+### 7. Pantalla de jornada laboral
+- Se entra desde MENU → "Jornada Laboral" en la pantalla de inicio.
+- Selector FIJA / VARIABLE. Fija: un horario de inicio y fin para todos
+  los días. Variable: los 7 días, cada uno con un switch TRABAJO / LIBRE y
+  su horario.
+- Las horas se cambian con botones − / + de a 30 minutos.
+- Antes de guardar se valida (`validarJornada`): inicio antes que fin, y al
+  menos un día de trabajo si es variable. Si algo está mal, se muestra el
+  aviso y no se guarda.
+- Al guardar, el cronograma se acomoda a la jornada nueva (ver
+  "Decisiones tomadas") y la jornada y los bloques se guardan juntos con
+  `guardarJornadaYBloques` (un solo `multiSet`).
+- La lógica está en `sistema/jornada.ts`; la pantalla solo muestra y guarda.
+
+### 8. Navegación con pestañas
+- Barra fija abajo: **Hoy · Calendario · Empresas · Paquetes**. Desde
+  cualquier pestaña se vuelve al cronograma con un toque. Reemplaza el
+  menú MENU que tenía la pantalla de inicio.
+- Jornada laboral se abre con el botón ⚙ de Hoy. Agregar Empresa y
+  Agregar Paquete se abren con el botón + de su pestaña, como modal.
+- Los modales y la jornada se cierran con `cerrarPantalla(alternativa)`
+  (`components/kit`): vuelve atrás si hay historial y, si no, va a la
+  ruta indicada. Reemplaza el `router.replace()` directo de antes, que
+  con pestañas apilaba una copia de las pestañas.
+- Todas las pestañas recargan sus datos al entrar (`useFocusEffect`).
+
+### 9. Calendario (semana / mes)
+- **Semana:** los 7 días (lunes a domingo), cada uno con su número, el
+  total de horas y sus sesiones.
+- **Mes:** grilla de lunes a domingo con hasta 3 puntos de color por día
+  (uno por empresa). Al tocar un día se ven sus sesiones debajo.
+- Flechas ‹ › para moverse, "Ir a hoy" para volver.
+- Solo muestra el cronograma ya guardado; los cálculos de fechas están en
+  `sistema/calendario.ts`.
+
+### 10. Rediseño visual: "brutalista refinado" (elegido por el dueño)
+- Se mantiene la identidad (bordes negros, amarillo, sombras duras) pero
+  más prolija: tipografías **Space Grotesk** (texto) y **Space Mono**
+  (horas y números), esquinas apenas redondeadas, escala de espaciados.
+- Todo sale de `components/kit/tema.ts`: cambiar un color ahí lo cambia
+  en toda la app.
+- La sombra dura es una capa negra detrás de cada tarjeta/botón (no
+  `elevation`), así se ve igual en iPhone y Android. Los botones "se
+  hunden" al tocarlos.
+- **Color por empresa** (`colorDeEmpresa`): sale del id, así cada empresa
+  tiene siempre el mismo color sin guardarlo.
+- Hoy muestra un resumen (sesiones, horas, empresas); Mis Empresas, una
+  barra de horas consumidas y hasta cuándo dura la ventana; Mis Paquetes,
+  el tamaño de sesión y cuántas empresas lo usan; Agregar Paquete, una
+  vista previa del tamaño de sesión.
+- Agregar Empresa y Agregar Paquete no dejan guardar con el nombre vacío
+  (y Agregar Paquete, con horas que no sean un número mayor a 0).
+
+### 11. Limpieza
+- Se borraron los archivos de la plantilla de Expo que no se usaban
+  (`explore.tsx`, `layout.tsx`, `components/app-tabs`, `themed-*`,
+  `hooks/`, `constants/theme.ts`, etc.). Con eso desapareció el error de
+  lint que venía de la plantilla.
+- Se sacó la prop `onClose` de los modales y el import interno de
+  `expo-router/build/...` en Agregar Paquete.
+
+### 12. Renovación, tamaño de sesión y horarios pasados (decisiones del dueño, 2026-10-06)
+- **Renovación automática** (`sistema/renovacion.ts`): cuando termina la
+  ventana de una empresa, el chequeo diario le abre una nueva desde el día
+  siguiente al fin de la anterior (respeta el ciclo), con el paquete
+  completo. Si la app no se abrió durante varios períodos, salta directo a
+  la ventana que contiene a hoy, y solo agenda desde hoy en adelante.
+  - Prioridad media: se genera el cronograma completo de la ventana nueva.
+    Si no entra, no se renueva, se avisa y se reintenta al día siguiente.
+  - Prioridad alta: solo se renueva la ventana (horas completas otra vez);
+    sigue con su x4 diario.
+  - Van por antigüedad (la empresa más vieja elige lugar primero).
+  - Hoy muestra el aviso "Se renovó el paquete de X". Mis Empresas muestra
+    "Se renueva el ..." en cada empresa.
+- **Sábados y domingos nunca hay sesiones** (decisión del dueño,
+  2026-10-06): ni normales, ni x4, ni excedente (el del viernes pasa al
+  lunes). La jornada laboral solo se configura de lunes a viernes. Si el
+  switch se prende un fin de semana, el primer x4 es el lunes. El chequeo
+  diario mueve solas las sesiones de mañana en adelante que hayan quedado
+  en fin de semana o fuera de la jornada (datos viejos); si alguna no
+  entra, avisa.
+- **Tamaño de sesión = horas del paquete ÷ días hábiles** (decisión del
+  dueño, 2026-10-06): ÷ 5 si es semanal; si es mensual, ÷ los días de
+  lunes a viernes de los 30 días de SU ventana (20 a 22 según el día en
+  que arranque). Redondeado hacia arriba a múltiplos de 5 minutos
+  (`tamanoBloqueMinutos`). Ej: 10 h/semana → 2 h; 8 h/semana → 1 h 40 min;
+  30 h/mes con 22 hábiles → 1 h 25 min. El x4 de prioridad alta es 4 veces
+  eso. En Mis Paquetes se muestra con "≈" para los mensuales (calculado
+  como si la ventana arrancara hoy). Reemplaza la tabla vieja (1/2/3/4 h).
+- **Hoy no se agenda en horarios que ya pasaron**: al crear una empresa,
+  renovar o generar el x4, para el día de hoy se busca lugar desde la hora
+  actual redondeada al próximo cuarto de hora (15:07 → 15:15). Si la
+  jornada de hoy ya terminó, arranca mañana.
+- **Las sesiones se dan por hechas** (no se marcan): todo lo agendado de
+  hoy para atrás cuenta como consumido.
+- **Sesiones perdidas por una urgencia** (no entran en la ventana de su
+  empresa): se borran y se avisa, como ya estaba.
+
+### 13. Notas de las sesiones (pedido del dueño, 2026-10-06)
+- En Hoy, cada sesión tiene un botón "Agregar nota" / "Editar nota" que
+  abre el modal NotaSesion: muestra empresa y horario y un campo de texto
+  (hasta 500 caracteres) para anotar lo que se hizo. Guardar con el texto
+  vacío borra la nota.
+- La nota se ve en la tarjeta de la sesión, en Hoy y en el Calendario
+  (en el Calendario solo se lee).
+- Se guarda en el propio bloque (`BloqueHorario.nota`), con
+  `ponerNota` de `sistema/notas.ts`. Como todos los recálculos mueven
+  solo sesiones de mañana en adelante, las notas de hoy no se pierden.
+  Si se borra una empresa, sus notas se van con sus bloques.
+
+### 14. Cambios en el modelo de datos
+- `BloqueHorario.nota?: string`: lo que el usuario anotó que hizo en esa
+  sesión.
+- `Empresa.inicioVentana?: string`: inicio de la ventana ACTUAL; cambia en
+  cada renovación. Si no está, es `fechaAlta` (que ahora es solo la fecha
+  en que se creó la empresa). Las horas consumidas, el x4 y el "paquete
+  agotado" cuentan solo los bloques de la ventana actual.
 - `Empresa.empresasDesplazadas?: string[]`: ids de las empresas que corrió
   mientras estuvo en alta, para saber a quién recalcular al apagar.
 - `Empresa.ultimoDiaUrgente?: string`: último día para el que ya se generó
@@ -148,10 +279,26 @@ cierra en el medio.
 Son decisiones que no estaban definidas en las reglas de negocio. Se pueden
 cambiar.
 
-- **Jornada provisoria de 09:00 a 18:00** (`JORNADA_POR_DEFECTO`) mientras no
-  exista la pantalla de jornada.
-- **Horas consumidas** = la duración de todos los bloques de la empresa de
-  hoy para atrás, incluido el de hoy. No se lleva un registro aparte.
+- **Jornada por defecto de 09:00 a 18:00** (`JORNADA_POR_DEFECTO`) mientras
+  el usuario no guarde la suya en la pantalla de jornada.
+- **El cronograma siempre queda dentro de la jornada** (decisión del dueño,
+  2026-10-06). Al guardar una jornada nueva, las sesiones de mañana en
+  adelante que quedan fuera (día libre u horario fuera de rango) se mueven
+  (`ajustarCronogramaAJornada`):
+  - las normales, enteras y dentro de la ventana de su empresa; primero
+    desde su día original hacia adelante y, si no, desde mañana;
+  - las x4 de prioridad alta van primero (FIFO), hasta 30 días adelante, y
+    se parten si no entran enteras (igual que el excedente);
+  - si alguna no entra en ningún lado, **no se guarda la jornada** y se
+    avisa qué empresas no entran (misma regla "no hay cupos": nada a medias).
+- **Lo de hoy no se mueve al cambiar la jornada**, solo de mañana en
+  adelante (igual que los demás recálculos): una sesión de hoy puede ya
+  estar hecha y cuenta como consumida.
+- **Las horas de la jornada se eligen con − / + de a 30 minutos**, no
+  escribiéndolas, para que no se pueda cargar una hora inválida.
+- **Horas consumidas** = la duración de los bloques de la empresa en su
+  ventana actual, de hoy para atrás, incluido el de hoy. No se lleva un
+  registro aparte (las sesiones se dan por hechas).
 - **Al prender el switch** se borran los bloques normales de la empresa de
   mañana en adelante (los de hoy quedan). Si no, tendría a la vez los
   normales y los x4.
@@ -189,12 +336,12 @@ cambiar.
   - al apagar la primera, se calculan 8 h consumidas y las 22 h restantes se
     reparten hasta el día 27, sin superposiciones.
 
-- `npx expo lint` (2026-10-03): 1 error y 5 advertencias, ninguno en
-  código nuestro de `sistema/` ni en la pantalla de inicio:
-  - error en `src/hooks/use-color-scheme.web.ts` (archivo de la plantilla
-    de Expo, `setState` dentro de un `useEffect`);
-  - advertencias en los modales: `react` importado dos veces y un
-    `useEffect` sin usar en `AgregarPaquete`.
+- `npx expo lint` (2026-10-06): sin errores ni advertencias.
+- Rediseño + pestañas + calendario (2026-10-06): `npx expo export` arma la
+  app para iOS y Android sin errores (con las fuentes incluidas); las
+  funciones de fechas del calendario se probaron fuera del celular
+  (semanas de lunes a domingo, meses que empiezan en lunes, febrero de 4
+  semanas, cambio de año). **Falta verlo en el celular.**
 
 - La pantalla de inicio se probó en el celular (Expo Go) el 2026-10-05 y
   funciona bien.
@@ -207,6 +354,49 @@ cambiar.
   (x4 = 12 h, jornada de 9 h) agenda 8 h + 9 h + 9 h + 4 h, el total
   queda exactamente en 30 h y el switch se apaga solo el día de la última
   sesión, sin superposiciones.
+- Jornada laboral (2026-10-06): se probaron fuera del celular la
+  validación, el guardado de jornada fija y variable, y un cronograma
+  con jornada variable (lun-vie 09-13, sábado 10-12, domingo libre): no
+  hay sesiones en domingo ni fuera de horario. Falta probar la pantalla en
+  el celular.
+- Cambio de jornada (2026-10-06), con 3 empresas armadas en 09-18:
+  - pasar a lun-vie 10-16 mueve 15 sesiones; ninguna queda fuera de la
+    jornada ni de la ventana de su empresa, cada empresa conserva sus horas
+    totales, sin superposiciones, y lo de hoy no se toca;
+  - una jornada sin lugar (solo domingo 1 h) no se guarda;
+  - guardar la misma jornada no mueve nada;
+  - con una empresa en alta y la jornada achicada a 09-14, el excedente
+    x4 también queda dentro (partido), sin superposiciones.
+
+- Renovación, tamaño de sesión y horarios pasados (2026-10-06), fuera del
+  celular:
+  - tamaño (con la regla anterior, ÷ 7 / ÷ 30; reemplazada después por
+    días hábiles): 30 h/mes → 60 min, 8 h/semana → 70 min;
+  - crear una empresa a las 15:07: hoy nada antes de las 15:15, igual
+    entran las 30 h (30 sesiones de 1 h, una por día); a las 18:30 arranca
+    mañana; el x4 de hoy también arranca después de las 15:15;
+  - renovación: la mensual se renueva el día siguiente al fin con sus 30 h
+    completas, las horas consumidas arrancan de cero y una segunda llamada
+    no cambia nada; si la app no se abre por semanas, salta a la ventana
+    que contiene a hoy y agenda solo desde hoy; si no hay cupo, no se
+    renueva y lo logra al día siguiente; una empresa en alta renueva su
+    ventana y sigue con su x4 sin sesiones normales;
+  - sin superposiciones en ningún caso; las pruebas anteriores de jornada
+    y calendario siguen pasando.
+
+- Fines de semana y tamaño ÷ días hábiles (2026-10-06), fuera del
+  celular: ninguna sesión en sábado o domingo al crear empresas, con
+  prioridad alta (el excedente del viernes pasa al lunes) ni al prender el
+  switch un sábado (el lunes recibe un solo x4); la mensual tiene una
+  sesión por día hábil y la semanal 5; datos viejos con sesiones en fin de
+  semana se mueven solos sin perder horas; una jornada vieja con sábado
+  guardado no agenda nada el sábado.
+
+- Notas (2026-10-06), fuera del celular: se guardan sin espacios de más,
+  se cortan en 500 caracteres, el texto vacío las borra, y las notas de
+  hoy siguen ahí después de prender/apagar la prioridad alta y del
+  chequeo diario. La app empaqueta para iOS y Android. Falta probar el
+  modal en el celular.
 
 ### Entorno de desarrollo (esta PC)
 - Node.js 24 LTS instalado con `winget`; dependencias con `npm ci`.
@@ -218,30 +408,24 @@ cambiar.
 
 ## Qué falta
 
-### Para que el cronograma funcione de punta a punta
-- [ ] **Pantalla de jornada laboral** (fija o variable), que usa
-      `guardarJornada`.
-
 ### Limitaciones conocidas
-- **Horarios ya pasados:** el bloque de hoy puede quedar en un horario que
-  ya pasó (por ejemplo, si se prende el switch a las 15 h, el bloque puede
-  quedar a las 10 h). Lo mismo al crear una empresa a la tarde.
 - **Empresas viejas:** las creadas antes de estos cambios no tienen bloques,
   y algunas tienen `fechaAlta` con formato ISO completo. Conviene borrarlas
-  y volver a crearlas.
-- **Sesiones perdidas:** si un bloque desplazado no entra en la ventana de su
-  empresa, se saca del cronograma y se muestra un aviso. Las reglas de
-  negocio asumen que las urgencias duran poco y no definen qué hacer en ese
-  caso.
+  y volver a crearlas. Las creadas con la tabla vieja de tamaño de bloque
+  conservan sus sesiones hasta que se renueven (ahí toman el tamaño nuevo).
+
+### Para publicar (se ven más adelante)
+- [ ] Ícono, pantalla de carga y nombre de la app (hoy son los de la
+      plantilla de Expo, en azul).
+- [ ] Respaldo de datos: exportar/importar un archivo, o backend con
+      cuentas de usuario (también habilitaría la versión de escritorio).
+- [ ] Distribución: TestFlight (Apple Developer, 99 USD/año) y/o Google
+      Play (25 USD, pago único).
 
 ### Pendientes de producto (de `CLAUDE.md`)
-- [ ] Confirmar la tabla de tamaño de bloque con datos reales.
-- [ ] Vista de calendario semana/mes.
 - [ ] Vinculación con el calendario nativo.
 - [ ] Decidir si se suma backend y cuentas de usuario.
 - [ ] (Futuro) Versión de escritorio sincronizada.
 
 ### Detalles menores
-- `AgregarEmpresa` recibe una prop `onClose` que Expo Router nunca le pasa.
-  No rompe nada, pero se puede borrar.
 - `actualizarEmpresa` en `storage/` quedó sin uso.

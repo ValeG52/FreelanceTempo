@@ -6,17 +6,22 @@ import { Empresa, BloqueHorario } from "../type/index";
 
 // Borrar una empresa libera TODO su espacio en el cronograma: se van
 // todos sus bloques (pasados y futuros). A las demás no se las reordena.
+// El tipo de retorno { empresas: ...; bloques: ... } es un objeto con dos listas
+// (como devolver una tupla con nombre en C#).
 export function eliminarEmpresa(
   empresaId: string,
   empresas: Empresa[],
   bloques: BloqueHorario[]
 ): { empresas: Empresa[]; bloques: BloqueHorario[] } {
   const empresasRestantes = empresas
-    .filter((e) => e.id !== empresaId)
+    // filter = deja solo las que cumplen (como Where en LINQ)
+    .filter((e) => e.id !== empresaId) // !== es "distinto" (=== es "igual")
     // si alguna en prioridad alta la tenía anotada como desplazada, la saco de esa
     // lista para que al apagar el switch no intente recalcular una empresa que ya no existe
     .map((e) =>
+      // "?." = si empresasDesplazadas no existe, no falla: da undefined
       e.empresasDesplazadas?.includes(empresaId)
+        // { ...e, campo: x } = copia de e cambiando solo ese campo (como "with" en C#)
         ? { ...e, empresasDesplazadas: e.empresasDesplazadas.filter((id) => id !== empresaId) }
         : e
     );

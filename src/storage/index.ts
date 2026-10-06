@@ -1,6 +1,13 @@
+// storage/index.ts
+// Guarda y lee los datos del celular con AsyncStorage (un almacén de
+// clave → texto). No tiene reglas de negocio: solo guarda y lee.
+
+// "import X from" trae lo que el otro archivo exporta por defecto;
+// "import { A, B } from" trae cosas puntuales por su nombre
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Paquete, Empresa, BloqueHorario, JornadaLaboral } from "../type/index";
 
+// const = variable que no se puede reasignar (como readonly)
 const KEY_PAQUETES = "paquetes";
 const KEY_EMPRESAS = "empresas";
 const KEY_BLOQUES = "bloques";
@@ -8,14 +15,20 @@ const KEY_JORNADA = "jornada";
 
 // PAQUETES
 
+// "async" = la función tarda (lee/escribe en el celular) y devuelve una
+// Promise, como un Task en C#. "await" espera a que termine.
 export async function guardarPaquete(paquete: Paquete) {
   const paquetesActuales = await obtenerPaquetes();
+  // [...lista, x] = lista nueva con todo lo de antes más x al final
   const nuevaLista = [...paquetesActuales, paquete];
+  // AsyncStorage solo guarda texto: JSON.stringify convierte la lista a texto JSON
   await AsyncStorage.setItem(KEY_PAQUETES, JSON.stringify(nuevaLista));
 }
 
+// Promise<Paquete[]> = cuando termine, devuelve una lista de paquetes (Task<List<Paquete>>)
 export async function obtenerPaquetes(): Promise<Paquete[]> {
-  const data = await AsyncStorage.getItem(KEY_PAQUETES);
+  const data = await AsyncStorage.getItem(KEY_PAQUETES); // null si nunca se guardó nada
+  // condición ? siSí : siNo  →  si hay texto lo convierte a lista; si no, lista vacía
   return data ? JSON.parse(data) : [];
 }
 
@@ -40,6 +53,8 @@ export async function obtenerEmpresas(): Promise<Empresa[]> {
 // Reemplaza la empresa con el mismo id por la versión nueva
 export async function actualizarEmpresa(empresa: Empresa) {
   const empresasActuales = await obtenerEmpresas();
+  // map = transforma cada elemento (como Select en LINQ)
+  // "(e) => ..." es una función flecha: recibe e y devuelve lo de la derecha (como una lambda)
   const nuevaLista = empresasActuales.map((e) => (e.id === empresa.id ? empresa : e));
   await AsyncStorage.setItem(KEY_EMPRESAS, JSON.stringify(nuevaLista));
 }
@@ -59,6 +74,7 @@ export async function guardarBloques(bloques: BloqueHorario[]) {
 // Guarda empresas y bloques en una sola operación (multiSet), para que no
 // quede una cosa guardada y la otra no si la app se cierra en el medio
 export async function guardarEmpresasYBloques(empresas: Empresa[], bloques: BloqueHorario[]) {
+  // multiSet recibe una lista de pares [clave, valor]
   await AsyncStorage.multiSet([
     [KEY_EMPRESAS, JSON.stringify(empresas)],
     [KEY_BLOQUES, JSON.stringify(bloques)],
@@ -67,7 +83,7 @@ export async function guardarEmpresasYBloques(empresas: Empresa[], bloques: Bloq
 
 // JORNADA LABORAL
 
-// Devuelve null si el usuario todavía no configuró su jornada
+// "JornadaLaboral | null" = devuelve una jornada o null (si todavía no se configuró)
 export async function obtenerJornada(): Promise<JornadaLaboral | null> {
   const data = await AsyncStorage.getItem(KEY_JORNADA);
   return data ? JSON.parse(data) : null;
@@ -75,4 +91,13 @@ export async function obtenerJornada(): Promise<JornadaLaboral | null> {
 
 export async function guardarJornada(jornada: JornadaLaboral) {
   await AsyncStorage.setItem(KEY_JORNADA, JSON.stringify(jornada));
+}
+
+// Guarda la jornada nueva junto con el cronograma ya acomodado a ella, en una
+// sola operación (multiSet): nunca queda una jornada con bloques fuera de horario
+export async function guardarJornadaYBloques(jornada: JornadaLaboral, bloques: BloqueHorario[]) {
+  await AsyncStorage.multiSet([
+    [KEY_JORNADA, JSON.stringify(jornada)],
+    [KEY_BLOQUES, JSON.stringify(bloques)],
+  ]);
 }

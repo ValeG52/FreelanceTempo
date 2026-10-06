@@ -4,7 +4,16 @@
 // Recibe datos y devuelve datos NUEVOS (no modifica los originales).
 
 import { Empresa, Paquete, BloqueHorario, JornadaLaboral } from "../type/index";
-import { calcularHorasConsumidas, fechaLocalISO, generarDiaUrgente, recalcularEmpresa } from "./cronograma";
+import {
+  ajustarCronogramaAJornada,
+  calcularHorasConsumidas,
+  esDiaHabil,
+  fechaLocalISO,
+  generarDiaUrgente,
+  momentoDe,
+  recalcularEmpresa,
+} from "./cronograma";
+import { aplicarRenovaciones } from "./renovacion";
 
 // Prende el switch. Guardo la fecha y HORA exacta de activación (ISO completo,
 // no solo "YYYY-MM-DD") porque es lo que define el orden FIFO entre varias
@@ -90,6 +99,13 @@ export function aplicarActivacionAlta(
   // Los de hoy se quedan (pueden ya estar hechos y cuentan como horas consumidas).
   const sinSusFuturos = bloques.filter((b) => !(b.empresaId === empresa.id && b.fecha > fechaHoy));
 
+  // Si hoy no se trabaja (sábado, domingo o día libre), hoy no hay x4:
+  // el primero lo genera el chequeo diario el próximo día hábil.
+  if (!esDiaHabil(jornada, fechaHoy)) {
+    const final: Empresa = { ...activada, empresasDesplazadas: [], ultimoDiaUrgente: fechaHoy };
+    return { empresas: reemplazarEmpresa(empresas, final), bloques: sinSusFuturos, bloquesPerdidos: [] };
+  }
+
   const resultado = generarDiaUrgente(
     activada,
     paquete,
@@ -97,7 +113,8 @@ export function aplicarActivacionAlta(
     jornada,
     sinSusFuturos,
     reemplazarEmpresa(empresas, activada),
-    paquetes
+    paquetes,
+    momentoDe(ahora) // el x4 de hoy arranca desde la hora actual
   );
 
   // ultimoDiaUrgente = hoy: el x4 de hoy ya está, así el chequeo diario no lo repite
@@ -181,6 +198,9 @@ export interface ResultadoChequeoDiario {
   bloquesPerdidos: BloqueHorario[]; // bloques de otras empresas que no se pudieron reubicar
   empresasFinalizadas: Empresa[];   // las que agotaron su paquete y se les apagó el switch solo
   empresasSinCupo: Empresa[];       // desplazadas que no se pudieron recalcular al apagarse una
+  empresasRenovadas: Empresa[];     // las que arrancaron una ventana nueva hoy
+  empresasFueraDeJornada: Empresa[]; // tienen sesiones en fin de semana / fuera de horario que no se pudieron mover
+  empresasSinCupoRenovacion: Empresa[]; // las que no se pudieron renovar por falta de lugar
   huboCambios: boolean;             // false = no había nada que generar, no hace falta guardar
 }
 
@@ -190,7 +210,7 @@ export interface ResultadoChequeoDiario {
  * Comparo en minutos enteros para no tener problemas de decimales.
  */
 function paqueteAgotado(empresa: Empresa, paquete: Paquete, bloques: BloqueHorario[], fechaHoy: string): boolean {
-  const minutosConsumidos = Math.round(calcularHorasConsumidas(empresa.id, bloques, fechaHoy) * 60);
+  const minutosConsumidos = Math.round(calcularHorasConsumidas(empresa, bloques, fechaHoy) * 60);
   return minutosConsumidos >= paquete.horas * 60;
 }
 
@@ -207,9 +227,11 @@ function ultimoDiaConX4(empresa: Empresa): string | null {
 }
 
 /**
- * Genera el bloque x4 de hoy para cada empresa en prioridad alta que todavía
- * no lo tenga. Se puede llamar todas las veces que se quiera en el mismo día:
- * la segunda vez no hace nada (huboCambios: false).
+ * Chequeo diario: primero renueva los paquetes de las empresas cuya ventana
+ * terminó (ver sistema/renovacion.ts), y después genera el bloque x4 de hoy
+ * para cada empresa en prioridad alta que todavía no lo tenga. Se puede
+ * llamar todas las veces que se quiera en el mismo día: la segunda vez no
+ * hace nada (huboCambios: false).
  *
  * - Si una empresa ya consumió todas las horas de su paquete, se le apaga el
  *   switch solo (igual que apagarlo a mano: vuelve a media y las que corrió
@@ -222,7 +244,7 @@ function ultimoDiaConX4(empresa: Empresa): string | null {
  *   días que ya pasaron.
  * - Las empresas que corre se suman a `empresasDesplazadas`, para que al
  *   apagar el switch vuelvan a su patrón habitual.
- * @param fechaHoy día de hoy, "YYYY-MM-DD"
+ * @param ahora momento actual (fecha de hoy y hora, para no agendar hoy en horarios que ya pasaron)
  * @returns las listas completas ya actualizadas, listas para guardar
  */
 export function aplicarChequeoDiario(
@@ -230,16 +252,21 @@ export function aplicarChequeoDiario(
   paquetes: Paquete[],
   jornada: JornadaLaboral,
   bloques: BloqueHorario[],
-  fechaHoy: string
+  ahora: Date
 ): ResultadoChequeoDiario {
-  let listaEmpresas = empresas;
-  let listaBloques = bloques;
+  const momento = momentoDe(ahora);
+  const fechaHoy = momento.fecha;
+
+  // 0) Renovaciones: las empresas cuya ventana terminó arrancan una nueva
+  const renovaciones = aplicarRenovaciones(empresas, paquetes, jornada, bloques, momento);
+  let listaEmpresas = renovaciones.empresas;
+  let listaBloques = renovaciones.bloques;
   const bloquesPerdidos: BloqueHorario[] = [];
   const empresasFinalizadas: Empresa[] = [];
   const empresasSinCupo: Empresa[] = [];
-  let huboCambios = false;
+  let huboCambios = renovaciones.huboCambios;
 
-  for (const enAlta of empresasEnAltaPorOrdenFIFO(empresas)) {
+  for (const enAlta of empresasEnAltaPorOrdenFIFO(listaEmpresas)) {
     // busco la versión actualizada de la empresa (una anterior en la fila
     // pudo haberla cambiado) y el estado actual de los bloques
     const actual = listaEmpresas.find((e) => e.id === enAlta.id) ?? enAlta;
@@ -258,9 +285,10 @@ export function aplicarChequeoDiario(
       continue; // "continue" pasa a la siguiente empresa de la fila
     }
 
-    // 2) ¿Ya tiene el x4 de hoy? → no hago nada
+    // 2) ¿Ya tiene el x4 de hoy, o hoy no se trabaja (fin de semana / día libre)? → nada
     const ultimoDia = ultimoDiaConX4(actual);
     if (ultimoDia !== null && ultimoDia >= fechaHoy) continue;
+    if (!esDiaHabil(jornada, fechaHoy)) continue;
 
     // 3) Le genero el x4 de hoy
     const resultado = generarDiaUrgente(
@@ -270,7 +298,8 @@ export function aplicarChequeoDiario(
       jornada,
       listaBloques,
       listaEmpresas,
-      paquetes
+      paquetes,
+      momento // el x4 de hoy arranca desde la hora actual
     );
 
     // new Set(...) junta las dos listas sin repetidos (como Union en LINQ)
@@ -287,12 +316,24 @@ export function aplicarChequeoDiario(
     huboCambios = true;
   }
 
+  // 4) Ninguna sesión de mañana en adelante puede quedar en fin de semana o
+  //    fuera de la jornada (por ej. las que se agendaron antes de esta regla):
+  //    las que estén afuera se mueven a días hábiles dentro de su ventana.
+  const ajuste = ajustarCronogramaAJornada(jornada, listaEmpresas, paquetes, listaBloques, fechaHoy);
+  if (ajuste.exito && ajuste.bloquesMovidos > 0) {
+    listaBloques = ajuste.bloques;
+    huboCambios = true;
+  }
+
   return {
     empresas: listaEmpresas,
     bloques: listaBloques,
     bloquesPerdidos,
     empresasFinalizadas,
     empresasSinCupo,
+    empresasFueraDeJornada: ajuste.exito ? [] : ajuste.empresasSinLugar,
+    empresasRenovadas: renovaciones.renovadas,
+    empresasSinCupoRenovacion: renovaciones.sinCupo,
     huboCambios,
   };
 }

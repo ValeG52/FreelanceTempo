@@ -1,6 +1,7 @@
-// src/app/(modals)/AgregarEmpresa.tsx
-import React from "react";
-import { View, Text, StyleSheet, TextInput, TouchableOpacity } from "react-native";
+// src/app/(modals)/AgregarEmpresa.tsx — modal para dar de alta una empresa
+// Al guardar se genera todo su cronograma; si no entra, no se guarda nada.
+import React, { useState, useEffect } from "react";
+import { View, Text, StyleSheet, Pressable } from "react-native";
 import {
   obtenerPaquetes,
   obtenerEmpresas,
@@ -8,267 +9,213 @@ import {
   obtenerJornada,
   guardarEmpresasYBloques,
 } from "../../storage/index";
-import { useState, useEffect } from "react";
 import { Empresa, Paquete } from "../../type/index";
-import { crearEmpresaConCronograma, fechaLocalISO, JORNADA_POR_DEFECTO } from "../../sistema/cronograma";
-import { router } from "expo-router";
+import {
+  crearEmpresaConCronograma,
+  fechaLocalISO,
+  momentoDe,
+  JORNADA_POR_DEFECTO,
+} from "../../sistema/cronograma";
+import {
+  Pantalla,
+  Campo,
+  Boton,
+  BotonIcono,
+  Aviso,
+  Icono,
+  cerrarPantalla,
+  colores,
+  espacio,
+  fuentes,
+  borde,
+  tipo,
+} from "../../components/kit";
 
-const AgregarEmpresa = ({ onClose }: { onClose: () => void }) => {
+/**
+ * Modal Agregar Empresa: nombre y paquete. Arranca siempre en prioridad
+ * media y con fecha de alta hoy.
+ */
+const AgregarEmpresa = () => {
   const [nombre, setNombre] = useState("");
   const [paqueteId, setPaqueteId] = useState("");
   const [paquetes, setPaquetes] = useState<Paquete[]>([]);
-  const [selectorAbierto, setSelectorAbierto] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [guardando, setGuardando] = useState(false);
 
+  // con [] corre una sola vez, al abrir la pantalla: carga los paquetes
   useEffect(() => {
     obtenerPaquetes().then((data) => setPaquetes(data));
   }, []);
 
-  const GuardarEmpresa = async () => {
+  // trim() saca los espacios de los costados: "  " cuenta como vacío
+  const valido = nombre.trim() !== "" && paqueteId !== "";
+
+  /** Crea la empresa con todo su cronograma; si no hay cupos, avisa y no guarda nada. */
+  const guardar = async () => {
     const paquete = paquetes.find((p) => p.id === paqueteId);
-    if (!paquete) return;
+    if (!paquete || !valido) return;
     setError(null);
+    setGuardando(true);
 
-    const nuevaEmpresa: Empresa = {
-      id: Date.now().toString(),
-      nombre,
-      paqueteId,
-      prioridad: "media",                     // siempre arranca en media
-      fechaAlta: fechaLocalISO(new Date()),   // "YYYY-MM-DD" de hoy, define el inicio de su ventana
-      horasConsumidas: 0,                     // arranca en cero, todavía no gastó nada
-    };
+    try {
+      const nuevaEmpresa: Empresa = {
+        id: Date.now().toString(),
+        nombre: nombre.trim(),
+        paqueteId,
+        prioridad: "media",                     // siempre arranca en media
+        fechaAlta: fechaLocalISO(new Date()),   // "YYYY-MM-DD" de hoy, define el inicio de su ventana
+        horasConsumidas: 0,                     // arranca en cero, todavía no gastó nada
+      };
 
-    const [empresas, bloques, jornadaGuardada] = await Promise.all([
-      obtenerEmpresas(),
-      obtenerBloques(),
-      obtenerJornada(),
-    ]);
+      const [empresas, bloques, jornadaGuardada] = await Promise.all([
+        obtenerEmpresas(),
+        obtenerBloques(),
+        obtenerJornada(),
+      ]);
 
-    // el sistema arma todas las sesiones del paquete dentro de su ventana
-    const resultado = crearEmpresaConCronograma(
-      nuevaEmpresa,
-      paquete,
-      jornadaGuardada ?? JORNADA_POR_DEFECTO,
-      bloques
-    );
+      // el sistema arma todas las sesiones del paquete dentro de su ventana
+      const resultado = crearEmpresaConCronograma(
+        nuevaEmpresa,
+        paquete,
+        jornadaGuardada ?? JORNADA_POR_DEFECTO,
+        bloques,
+        momentoDe(new Date()) // hoy solo se agenda desde la hora actual
+      );
 
-    if (!resultado.exito) {
-      // regla de negocio: si no entra todo, no se guarda nada (ni la empresa)
-      setError("No hay cupos para este paquete en los próximos días.");
-      return;
+      if (!resultado.exito) {
+        // regla de negocio: si no entra todo, no se guarda nada (ni la empresa)
+        setError("No hay cupos para este paquete en los próximos días.");
+        return;
+      }
+
+      await guardarEmpresasYBloques([...empresas, nuevaEmpresa], resultado.bloques);
+      cerrarPantalla("/mis-empresas");
+    } finally {
+      setGuardando(false);
     }
-
-    await guardarEmpresasYBloques([...empresas, nuevaEmpresa], resultado.bloques);
-    if (onClose) onClose();
-    router.replace("/mis-empresas");
   };
 
   return (
-    <View style={styles.container}>
-      <View style={styles.card}>
-        <Text style={styles.titulo}>AGREGAR EMPRESA</Text>
-        <TextInput
-          style={styles.input}
-          placeholder="Nombre"
-          placeholderTextColor="#6b6b6b"
-          value={nombre}
-          onChangeText={setNombre}
+    <Pantalla
+      antetitulo="Nueva"
+      titulo="Empresa"
+      conTabs={false}
+      accion={
+        <BotonIcono
+          icono={{ ios: "xmark", android: "close", web: "close" }}
+          etiquetaAccesible="Cerrar"
+          onPress={() => cerrarPantalla("/mis-empresas")}
         />
-        <View style={styles.packageSelectWrap}>
-          <TouchableOpacity
-            style={styles.packageSelect}
-            onPress={() => setSelectorAbierto(!selectorAbierto)}
-            accessibilityRole="button"
-            accessibilityLabel="Seleccionar paquete"
-          >
-            <Text style={paqueteId ? styles.packageSelectText : styles.packageSelectPlaceholder}>
-              {paquetes.find((paquete) => paquete.id === paqueteId)?.nombre ?? "Selecciona un paquete"}
-            </Text>
-            <Text style={styles.packageSelectArrow}>{selectorAbierto ? "▲" : "▼"}</Text>
-          </TouchableOpacity>
-          {selectorAbierto && (
-            <View style={styles.packageOptions}>
-              {paquetes.length > 0 ? (
-                paquetes.map((paquete) => (
-                  <TouchableOpacity
-                    key={paquete.id}
-                    style={[
-                      styles.packageOption,
-                      paquete.id === paqueteId && styles.packageOptionActive,
-                    ]}
-                    onPress={() => {
-                      setPaqueteId(paquete.id);
-                      setSelectorAbierto(false);
-                    }}
-                  >
-                    <Text style={styles.packageOptionText}>
-                      {paquete.nombre} - {paquete.horas} h/{paquete.periodo}
-                    </Text>
-                  </TouchableOpacity>
-                ))
-              ) : (
-                <Text style={styles.packageEmptyText}>No hay paquetes agregados</Text>
-              )}
-            </View>
-          )}
+      }
+    >
+      {/* value = lo que muestra; onChangeText = qué hacer cuando se escribe (acá: guardar en el state) */}
+      <Campo etiqueta="Nombre" placeholder="Ej. Acme S.A." value={nombre} onChangeText={setNombre} />
+
+      <Text style={[tipo.etiqueta, styles.etiqueta]}>PAQUETE</Text>
+      {paquetes.length === 0 ? (
+        <Aviso texto="Todavía no hay paquetes. Creá uno en la pestaña Paquetes antes de agregar una empresa." />
+      ) : (
+        // lista de paquetes para elegir uno (tipo "radio button")
+        <View style={styles.opciones}>
+          {paquetes.map((paquete, indice) => {
+            const elegido = paquete.id === paqueteId;
+            return (
+              <Pressable
+                key={paquete.id}
+                onPress={() => setPaqueteId(paquete.id)}
+                accessibilityRole="radio"
+                accessibilityState={{ checked: elegido }}
+                style={[styles.opcion, indice > 0 && styles.opcionSeparada, elegido && styles.opcionElegida]}
+              >
+                <View style={[styles.radio, elegido && styles.radioElegido]}>
+                  {elegido && <Icono nombre={{ ios: "checkmark", android: "check", web: "check" }} tamano={14} />}
+                </View>
+                <Text style={[styles.opcionNombre, elegido && styles.textoClaro]} numberOfLines={1}>
+                  {paquete.nombre}
+                </Text>
+                <Text style={[styles.opcionDetalle, elegido && styles.textoClaro]}>
+                  {paquete.horas} h/{paquete.periodo}
+                </Text>
+              </Pressable>
+            );
+          })}
         </View>
-        {error && <Text style={styles.errorText}>{error}</Text>}
-        <View style={styles.buttonGroup}>
-          <TouchableOpacity
-            style={[styles.primaryButton, !paqueteId && styles.primaryButtonDisabled]}
-            onPress={GuardarEmpresa}
-            disabled={!paqueteId}
-          >
-            <Text style={styles.primaryButtonText}>GUARDAR</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.secondaryButton} onPress={() => router.push("/")}>
-            <Text style={styles.secondaryButtonText}>CERRAR</Text>
-          </TouchableOpacity>
-        </View>
+      )}
+
+      <Text style={[tipo.secundario, styles.nota]}>
+        Se arma su cronograma completo al guardar. Arranca en prioridad media.
+      </Text>
+
+      {error && <Aviso texto={error} tipoAviso="error" />}
+
+      <View style={styles.botones}>
+        <Boton texto="Guardar empresa" onPress={guardar} disabled={!valido || guardando} />
+        <Boton texto="Cancelar" variante="secundario" onPress={() => cerrarPantalla("/mis-empresas")} />
       </View>
-    </View>
+    </Pantalla>
   );
 };
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    width: "100%",
-    maxWidth: 430,
-    alignSelf: "center",
-    padding: 20,
-    backgroundColor: "#f5f1e8",
-    justifyContent: "center",
+  etiqueta: {
+    marginBottom: 6,
   },
-  card: {
-    width: "100%",
-    backgroundColor: "#ffffff",
-    borderWidth: 2,
-    borderColor: "#111111",
-    padding: 18,
-    shadowColor: "#000000",
-    shadowOffset: { width: 5, height: 5 },
-    shadowOpacity: 1,
-    shadowRadius: 0,
-    elevation: 8,
+  opciones: {
+    borderWidth: borde.ancho,
+    borderColor: colores.tinta,
+    borderRadius: borde.radio,
+    overflow: "hidden",
+    backgroundColor: colores.superficie,
   },
-  titulo: {
-    fontSize: 24,
-    fontWeight: "900",
-    marginBottom: 20,
-    color: "#111111",
-    textAlign: "center",
-    letterSpacing: 1,
-  },
-  input: {
-    height: 46,
-    borderWidth: 2,
-    borderColor: "#111111",
-    backgroundColor: "#f5f1e8",
-    marginBottom: 12,
-    paddingHorizontal: 12,
-    color: "#111111",
-    fontWeight: "700",
-  },
-  packageSelectWrap: {
-    marginBottom: 12,
-  },
-  packageSelect: {
-    minHeight: 46,
-    borderWidth: 2,
-    borderColor: "#111111",
-    backgroundColor: "#f5f1e8",
-    paddingHorizontal: 12,
+  opcion: {
     flexDirection: "row",
     alignItems: "center",
-    justifyContent: "space-between",
+    gap: espacio.m,
+    paddingVertical: 14,
+    paddingHorizontal: espacio.m,
   },
-  packageSelectText: {
-    color: "#111111",
-    fontWeight: "700",
+  opcionSeparada: {
+    borderTopWidth: 1.5,
+    borderTopColor: colores.hundido,
   },
-  packageSelectPlaceholder: {
-    color: "#6b6b6b",
-    fontWeight: "700",
+  opcionElegida: {
+    backgroundColor: colores.tinta,
   },
-  packageSelectArrow: {
-    color: "#111111",
-    fontSize: 12,
-    fontWeight: "900",
-    marginLeft: 8,
-  },
-  packageOptions: {
-    borderWidth: 2,
-    borderTopWidth: 0,
-    borderColor: "#111111",
-    backgroundColor: "#ffffff",
-  },
-  packageOption: {
-    minHeight: 44,
+  radio: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: borde.ancho,
+    borderColor: colores.tinta,
+    backgroundColor: colores.superficie,
+    alignItems: "center",
     justifyContent: "center",
-    paddingHorizontal: 12,
-    borderTopWidth: 1,
-    borderTopColor: "#111111",
   },
-  packageOptionActive: {
-    backgroundColor: "#ffde59",
+  radioElegido: {
+    backgroundColor: colores.acento,
+    borderColor: colores.acento,
   },
-  packageOptionText: {
-    color: "#111111",
-    fontWeight: "700",
+  opcionNombre: {
+    flex: 1,
+    fontFamily: fuentes.semi,
+    fontSize: 16,
+    color: colores.tinta,
   },
-  packageEmptyText: {
-    color: "#6b6b6b",
-    fontWeight: "700",
-    padding: 12,
+  opcionDetalle: {
+    fontFamily: fuentes.mono,
+    fontSize: 13,
+    color: colores.tintaSuave,
   },
-  errorText: {
-    color: "#b00020",
-    fontWeight: "900",
-    marginBottom: 8,
+  textoClaro: {
+    color: colores.textoSobreTinta,
   },
-  buttonGroup: {
-    gap: 10,
-    marginTop: 8,
+  nota: {
+    marginTop: espacio.m,
+    marginBottom: espacio.l,
   },
-  primaryButton: {
-    backgroundColor: "#111111",
-    borderWidth: 2,
-    borderColor: "#111111",
-    paddingVertical: 12,
-    alignItems: "center",
-    shadowColor: "#000000",
-    shadowOffset: { width: 4, height: 4 },
-    shadowOpacity: 1,
-    shadowRadius: 0,
-    elevation: 6,
-  },
-  primaryButtonDisabled: {
-    opacity: 0.45,
-  },
-  primaryButtonText: {
-    color: "#f5f1e8",
-    fontSize: 14,
-    fontWeight: "900",
-    letterSpacing: 1.2,
-  },
-  secondaryButton: {
-    backgroundColor: "#ffde59",
-    borderWidth: 2,
-    borderColor: "#111111",
-    paddingVertical: 12,
-    alignItems: "center",
-    shadowColor: "#000000",
-    shadowOffset: { width: 4, height: 4 },
-    shadowOpacity: 1,
-    shadowRadius: 0,
-    elevation: 6,
-  },
-  secondaryButtonText: {
-    color: "#111111",
-    fontSize: 14,
-    fontWeight: "900",
-    letterSpacing: 1.2,
+  botones: {
+    gap: espacio.m,
+    marginTop: espacio.s,
   },
 });
 
