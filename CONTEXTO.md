@@ -314,7 +314,28 @@ cierra en el medio.
 - `ios.config.usesNonExemptEncryption: false` ya está en `app.json`, para
   que Apple no pregunte por el cifrado en cada versión.
 
-### 18. Cambios en el modelo de datos
+### 18. Usar la app en iPhone sin la compu: EAS Update + Expo Go (2026-10-08)
+- **Funciona** (probado por el dueño en su iPhone, con la compu apagada).
+- La app se publica en los servidores de Expo y Expo Go la descarga de ahí:
+  no hace falta `npx expo start` ni la cuenta paga de Apple.
+- QR para abrirla (siempre apunta a la última versión publicada):
+  `docs/qr-expo-go.png` → `exp://u.expo.dev/43a8236a-66e3-4161-9215-59fba42ff207?channel-name=preview`
+- **Publicar una versión nueva** (después de cada cambio que se quiera
+  llevar al celular):
+  `npx.cmd eas-cli@latest update --channel preview --environment preview --message "qué cambió"`
+  La próxima vez que se abra en Expo Go, baja los cambios.
+- `runtimeVersion` usa la política `sdkVersion` (queda `exposdk:57.0.0`):
+  es la que reconoce Expo Go. `eas update:configure` había puesto
+  `appVersion`, con la que Expo Go no encuentra la actualización.
+- **Ojo**: Expo Go solo abre proyectos de la SDK más reciente. Cuando
+  salga la SDK 58 y Expo Go se actualice, hay que actualizar el proyecto
+  (`npx expo install expo@latest --fix`) y volver a publicar.
+- Amigos: pueden instalar Expo Go y escanear el mismo QR (cada uno con
+  sus propios datos). Sin confirmar si en iPhone hace falta que tengan
+  sesión con una cuenta miembro de monumentalwebs; si no les abre,
+  invitarlos como Viewer en expo.dev → Members.
+
+### 19. Cambios en el modelo de datos
 - `DatosApp` (en `type/`): todos los datos juntos, lo que va en un respaldo.
 - `BloqueHorario.nota?: string`: lo que el usuario anotó que hizo en esa
   sesión.
