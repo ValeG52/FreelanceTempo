@@ -1,16 +1,22 @@
 {
   "expo": {
     "name": "Tempomanager",
-    "slug": "FreelanceTempo",
+    "slug": "tempomanager",
+    "owner": "monumentalwebs",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "freelancetempo",
+    "scheme": "tempomanager",
     "userInterfaceStyle": "light",
     "ios": {
-      "icon": "./assets/images/icon.png"
+      "icon": "./assets/images/icon.png",
+      "bundleIdentifier": "com.monumentalwebs.tempomanager",
+      "config": {
+        "usesNonExemptEncryption": false
+      }
     },
     "android": {
+      "package": "com.monumentalwebs.tempomanager",
       "adaptiveIcon": {
         "backgroundColor": "#FFD23F",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -38,6 +44,12 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "43a8236a-66e3-4161-9215-59fba42ff207"
+      }
     }
   }
 }

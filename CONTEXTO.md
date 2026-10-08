@@ -289,7 +289,32 @@ cierra en el medio.
 - Paquetes nuevos (instalados con `npx expo install`, incluidos en Expo
   Go): `expo-file-system`, `expo-sharing`, `expo-document-picker`.
 
-### 17. Cambios en el modelo de datos
+### 17. Compilación con EAS (2026-10-08)
+- Proyecto en Expo: **@monumentalwebs/tempomanager** (cuenta
+  monumentalwebs, elegida por el dueño):
+  https://expo.dev/accounts/monumentalwebs/projects/tempomanager
+- Identificador (no se puede cambiar una vez publicada):
+  `com.monumentalwebs.tempomanager` en Android (`package`) e iOS
+  (`bundleIdentifier`). `slug` y `scheme`: `tempomanager`.
+- `eas.json`:
+  - `preview`: genera un `.apk` instalable directo en Android (para
+    probar sin Expo Go): `npx eas-cli@latest build -p android --profile preview`
+  - `production`: para publicar en las tiendas (versión que se
+    incrementa sola).
+- La firma de Android (keystore) la generó EAS y está guardada en la
+  cuenta de Expo. Es la que identifica la app en Google Play: no borrarla.
+- Primera compilación Android (`preview`, `.apk`) terminada el 2026-10-08.
+  El dueño no tiene Android, así que no se instaló.
+- **iPhone**: hace falta el Apple Developer Program (99 USD/año, sin pago
+  mensual; al dueño le figura 109 USD con impuestos). El dueño creó la
+  cuenta de Apple pero **decidió evaluar el pago más adelante**. Cuando
+  esté activo: `npx.cmd eas-cli@latest build -p ios --profile production --auto-submit`
+  (interactivo: pide Apple ID y código), después agregarse como tester
+  interno en App Store Connect → TestFlight e instalar desde TestFlight.
+- `ios.config.usesNonExemptEncryption: false` ya está en `app.json`, para
+  que Apple no pregunte por el cifrado en cada versión.
+
+### 18. Cambios en el modelo de datos
 - `DatosApp` (en `type/`): todos los datos juntos, lo que va en un respaldo.
 - `BloqueHorario.nota?: string`: lo que el usuario anotó que hizo en esa
   sesión.
@@ -451,7 +476,10 @@ cambiar.
 - [x] Respaldo (exportar y restaurar): probado en el celular el
       2026-10-08, funciona.
 - [ ] Probar en el celular: renovación, días hábiles y notas.
-- [ ] Ver el ícono y la pantalla de carga en una compilación de prueba (EAS).
+- [ ] Instalar el `.apk` de la primera compilación (2026-10-08) y ver el
+      ícono, el nombre y la pantalla de carga.
+- [ ] iPhone: requiere cuenta de Apple Developer (99 USD/año) para
+      compilar e instalar fuera de Expo Go.
 - [ ] (Más adelante) backend con cuentas de usuario, si se quiere
       sincronizar o hacer la versión de escritorio.
 - [ ] Distribución: TestFlight (Apple Developer, 99 USD/año) y/o Google
