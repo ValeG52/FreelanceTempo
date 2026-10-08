@@ -335,7 +335,39 @@ cierra en el medio.
   sesión con una cuenta miembro de monumentalwebs; si no les abre,
   invitarlos como Viewer en expo.dev → Members.
 
-### 19. Cambios en el modelo de datos
+### 19. Versión de escritorio: web instalable (2026-10-08)
+- **Decisiones del dueño:** datos **separados** del celular (sin backend;
+  para pasar datos se usa el respaldo) y **web instalable** (no `.exe`).
+- Dirección: **https://tempomanager.expo.app** (EAS Hosting, gratis,
+  proyecto @monumentalwebs/tempomanager).
+- **Instalar en la compu:** abrir la dirección en Chrome o Edge → ícono de
+  "Instalar" en la barra de direcciones (o menú ⋯ → Aplicaciones →
+  Instalar Tempomanager). Queda con su ícono, en el menú inicio y en una
+  ventana propia sin barra del navegador.
+- Archivos:
+  - `public/manifest.json`: nombre, colores e íconos (`logo192.png`,
+    `logo512.png`, `apple-touch-icon.png`, generados desde
+    `assets/images/icon.png`). Es lo que permite instalarla.
+  - `public/sw.js`: service worker para que abra **sin internet** después
+    de la primera vez. Páginas: primero internet, si no la copia guardada.
+    Archivos JS/fuentes: primero la copia (Expo les cambia el nombre en
+    cada versión).
+  - `src/app/+html.tsx`: esqueleto HTML (solo web). Enlaza el manifest y
+    registra el service worker **solo en la versión publicada** (no con
+    `npx expo start`, para no ver copias viejas mientras se desarrolla).
+- **Datos en la compu:** quedan en el almacenamiento del navegador
+  (AsyncStorage usa `localStorage` en web). Si se borran los datos de
+  navegación de ese sitio, se pierden.
+- **Respaldo en web** (`ajustes.tsx`): exportar descarga el `.json` directo
+  (a Descargas) en vez de abrir el menú de compartir; restaurar lee el
+  archivo que devuelve el selector del navegador. El texto de Ajustes
+  explica que los datos de la compu y del celular son independientes.
+- **Publicar una versión nueva en la web** (además del `eas update` del
+  celular, son independientes):
+  `npx expo export -p web` y después `npx eas-cli@latest deploy --prod`
+  Las ventanas ya instaladas toman la versión nueva al volver a abrirlas.
+
+### 20. Cambios en el modelo de datos
 - `DatosApp` (en `type/`): todos los datos juntos, lo que va en un respaldo.
 - `BloqueHorario.nota?: string`: lo que el usuario anotó que hizo en esa
   sesión.
@@ -509,7 +541,10 @@ cambiar.
 ### Pendientes de producto (de `CLAUDE.md`)
 - [ ] Vinculación con el calendario nativo.
 - [ ] Decidir si se suma backend y cuentas de usuario.
-- [ ] (Futuro) Versión de escritorio sincronizada.
+- [x] Versión de escritorio (web instalable, datos separados): publicada
+      el 2026-10-08. Falta probarla a mano (crear paquete/empresa,
+      respaldo, instalarla, abrir sin internet).
+- [ ] (Futuro) Sincronizar datos entre celular y compu (requiere backend).
 
 ### Detalles menores
 - `actualizarEmpresa` en `storage/` quedó sin uso.

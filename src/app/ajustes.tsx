@@ -2,7 +2,7 @@
 // Se abre con el botón ⚙ de la pantalla Hoy. Tiene la jornada laboral y el
 // respaldo de datos (exportar a un archivo / restaurar desde un archivo).
 import React, { useState } from "react";
-import { View, Text, StyleSheet, Pressable } from "react-native";
+import { View, Text, StyleSheet, Pressable, Platform } from "react-native";
 import { useRouter } from "expo-router";
 import { File, Paths } from "expo-file-system";
 import * as Sharing from "expo-sharing"; // "* as Sharing" = trae todo el módulo bajo ese nombre
@@ -25,6 +25,22 @@ import {
 } from "../components/kit";
 import { fechaLarga } from "../components/formato";
 
+// En la compu (web) no hay menú de compartir ni carpeta de la app: el respaldo
+// se descarga directo, como cualquier archivo que se baja del navegador.
+const esWeb = Platform.OS === "web";
+
+/** Descarga un texto como archivo desde el navegador (solo web). */
+function descargarEnNavegador(nombreArchivo: string, contenido: string) {
+  // Blob = el contenido del archivo en memoria; el link temporal lo "descarga"
+  const blob = new Blob([contenido], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = nombreArchivo;
+  link.click();
+  URL.revokeObjectURL(url); // libera la memoria del Blob
+}
+
 /**
  * Pantalla Ajustes: acceso a la jornada laboral y respaldo de datos.
  * Restaurar un respaldo reemplaza TODO, así que pide confirmar antes.
@@ -41,12 +57,19 @@ const Ajustes = () => {
     setTrabajando(true);
     setAviso(null);
     try {
+      const ahora = new Date();
+      const respaldo = armarRespaldo(await obtenerTodo(), ahora);
+
+      if (esWeb) {
+        descargarEnNavegador(nombreArchivoRespaldo(ahora), JSON.stringify(respaldo, null, 2));
+        setAviso({ texto: "Respaldo descargado (quedó en la carpeta Descargas).", tipo: "info" });
+        return; // el finally igual se ejecuta
+      }
+
       if (!(await Sharing.isAvailableAsync())) {
         setAviso({ texto: "Este dispositivo no permite compartir archivos.", tipo: "error" });
         return;
       }
-      const ahora = new Date();
-      const respaldo = armarRespaldo(await obtenerTodo(), ahora);
 
       // escribo el archivo en la carpeta temporal de la app (si ya existía uno de hoy, lo piso)
       const archivo = new File(Paths.cache, nombreArchivoRespaldo(ahora));
@@ -76,7 +99,9 @@ const Ajustes = () => {
       const resultado = await DocumentPicker.getDocumentAsync({ type: "*/*", copyToCacheDirectory: true });
       if (resultado.canceled) return; // el usuario cerró el selector
 
-      const texto = await new File(resultado.assets[0].uri).text();
+      // en web el selector devuelve el archivo del navegador (.file); en el celular, una ruta (.uri)
+      const elegido = resultado.assets[0];
+      const texto = elegido.file ? await elegido.file.text() : await new File(elegido.uri).text();
       const lectura = leerRespaldo(texto); // la validación vive en sistema/
       if (!lectura.ok) {
         setAviso({ texto: lectura.error, tipo: "error" });
@@ -133,8 +158,12 @@ const Ajustes = () => {
       <Text style={[tipo.etiqueta, styles.seccion]}>RESPALDO DE DATOS</Text>
       <Tarjeta estiloInterno={styles.bloque} style={styles.margen}>
         <Text style={tipo.cuerpo}>
-          Tus datos están guardados solo en este celular. Hacé un respaldo de vez en cuando y guardalo en
-          Drive, Archivos o mandátelo por mail: si cambiás de celular o borrás la app, lo restaurás desde acá.
+          {esWeb
+            ? "Tus datos están guardados solo en este navegador de esta compu (no se comparten con el celular). " +
+              "Para pasarlos de un lado al otro, exportá el respaldo en uno y restauralo en el otro. " +
+              "Si borrás los datos de navegación de este sitio, se pierden: hacé un respaldo de vez en cuando."
+            : "Tus datos están guardados solo en este celular. Hacé un respaldo de vez en cuando y guardalo en " +
+              "Drive, Archivos o mandátelo por mail: si cambiás de celular o borrás la app, lo restaurás desde acá."}
         </Text>
         <View style={styles.botones}>
           <Boton
@@ -164,7 +193,7 @@ const Ajustes = () => {
             {aRestaurar.paquetes.length} paquetes y {aRestaurar.bloques.length} sesiones.
           </Text>
           <Text style={[tipo.cuerpo, styles.advertencia]}>
-            Reemplaza TODOS los datos que hay ahora en el celular. No se puede deshacer.
+            Reemplaza TODOS los datos que hay ahora en {esWeb ? "esta compu" : "el celular"}. No se puede deshacer.
           </Text>
           <View style={styles.botones}>
             <Boton texto="Sí, restaurar" variante="peligro" onPress={restaurar} disabled={trabajando} />
