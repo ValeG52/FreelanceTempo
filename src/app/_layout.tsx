@@ -55,6 +55,7 @@ export default function RootLayout() {
         <Stack.Screen name="(modals)/AgregarEmpresa" options={{ presentation: "modal" }} />
         <Stack.Screen name="(modals)/AgregarPaquete" options={{ presentation: "modal" }} />
         <Stack.Screen name="(modals)/NotaSesion" options={{ presentation: "modal" }} />
+        <Stack.Screen name="ajustes" />
         <Stack.Screen name="jornada" />
       </Stack>
     </>

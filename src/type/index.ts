@@ -44,6 +44,14 @@ export interface RangoHorario {
   horaFin: string;
 }
 
+// Todos los datos de la app juntos (lo que va en un respaldo)
+export interface DatosApp {
+  paquetes: Paquete[];
+  empresas: Empresa[];
+  bloques: BloqueHorario[];
+  jornada: JornadaLaboral | null; // null = todavía no se configuró
+}
+
 // Config de jornada: fija (mismo horario todos los días) o variable por día
 export interface JornadaLaboral {
   tipo: "fija" | "variable";

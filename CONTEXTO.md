@@ -4,7 +4,7 @@ Resumen del trabajo hecho hasta ahora: cómo está organizado el código, qué
 decisiones se tomaron, qué funciona y qué falta. Las reglas de negocio
 completas están en `CLAUDE.md`; acá va lo que se implementó y por qué.
 
-Última actualización: 2026-10-06.
+Última actualización: 2026-10-08.
 
 ---
 
@@ -20,7 +20,8 @@ src/
 │   │   ├── calendario.tsx      # vista semana / mes del cronograma completo
 │   │   ├── mis-empresas.tsx    # lista + progreso + switch de prioridad alta + eliminar
 │   │   └── mis-paquetes.tsx    # lista + eliminar
-│   ├── jornada.tsx             # jornada laboral (se abre con el ⚙ de Hoy)
+│   ├── ajustes.tsx             # ajustes (⚙ de Hoy): jornada laboral y respaldo
+│   ├── jornada.tsx             # jornada laboral (se abre desde Ajustes)
 │   └── (modals)/
 │       ├── AgregarEmpresa.tsx  # crea la empresa y genera su cronograma
 │       ├── AgregarPaquete.tsx
@@ -39,6 +40,7 @@ src/
 │   ├── jornada.ts              # validar y convertir la jornada laboral
 │   ├── renovacion.ts           # renovar el paquete al terminar la ventana
 │   ├── notas.ts                # poner / borrar la nota de una sesión
+│   ├── respaldo.ts             # armar y validar el archivo de respaldo
 │   └── calendario.ts           # fechas de semana/mes y agenda de varios días
 ├── storage/
 │   └── index.ts                # AsyncStorage: paquetes, empresas, bloques, jornada
@@ -257,7 +259,38 @@ cierra en el medio.
   solo sesiones de mañana en adelante, las notas de hoy no se pierden.
   Si se borra una empresa, sus notas se van con sus bloques.
 
-### 14. Cambios en el modelo de datos
+### 15. Nombre, ícono y pantalla de carga (2026-10-08)
+- La app se llama **Tempomanager** (`app.json` → `name`; el `slug` sigue
+  siendo FreelanceTempo, se usa solo internamente para EAS).
+- Ícono "bloques de agenda": tres barras de colores (celeste, coral,
+  verde) con borde negro y sombra dura sobre amarillo `#FFD23F`. Están
+  todas las variantes: `icon.png` (iOS y general), ícono adaptable de
+  Android (frente, fondo y monocromático), pantalla de carga y favicon.
+  Se generaron con un script (SVG → PNG con sharp) que no forma parte del
+  proyecto.
+- Pantalla de carga: las barras sobre fondo amarillo.
+- `userInterfaceStyle: "light"`: la app es solo en modo claro.
+- **No se ven en Expo Go** (que muestra sus propios ícono y nombre): recién
+  aparecen al compilar la app con EAS.
+- Se borraron las imágenes de la plantilla que no se usaban.
+
+### 16. Respaldo de datos (2026-10-08, elegido por el dueño: archivo)
+- Pantalla **Ajustes** (⚙ de Hoy): acceso a Jornada laboral y respaldo.
+- **Exportar respaldo**: arma un archivo `tempomanager-respaldo-AAAA-MM-DD.json`
+  con todos los datos (paquetes, empresas, sesiones con sus notas y
+  jornada) y abre el menú de compartir del celular para guardarlo en
+  Drive, Archivos, WhatsApp, mail, etc.
+- **Restaurar desde archivo**: se elige el archivo, se valida
+  (`leerRespaldo` en `sistema/respaldo.ts`: que sea de esta app, que no
+  sea de una versión más nueva, que no falten datos y que no haya
+  sesiones o empresas apuntando a cosas que no existen), se muestra un
+  resumen y se pide confirmar, porque **reemplaza todos los datos**. Si
+  el archivo no sirve, no se toca nada.
+- Paquetes nuevos (instalados con `npx expo install`, incluidos en Expo
+  Go): `expo-file-system`, `expo-sharing`, `expo-document-picker`.
+
+### 17. Cambios en el modelo de datos
+- `DatosApp` (en `type/`): todos los datos juntos, lo que va en un respaldo.
 - `BloqueHorario.nota?: string`: lo que el usuario anotó que hizo en esa
   sesión.
 - `Empresa.inicioVentana?: string`: inicio de la ventana ACTUAL; cambia en
@@ -415,10 +448,12 @@ cambiar.
   conservan sus sesiones hasta que se renueven (ahí toman el tamaño nuevo).
 
 ### Para publicar (se ven más adelante)
-- [ ] Ícono, pantalla de carga y nombre de la app (hoy son los de la
-      plantilla de Expo, en azul).
-- [ ] Respaldo de datos: exportar/importar un archivo, o backend con
-      cuentas de usuario (también habilitaría la versión de escritorio).
+- [x] Respaldo (exportar y restaurar): probado en el celular el
+      2026-10-08, funciona.
+- [ ] Probar en el celular: renovación, días hábiles y notas.
+- [ ] Ver el ícono y la pantalla de carga en una compilación de prueba (EAS).
+- [ ] (Más adelante) backend con cuentas de usuario, si se quiere
+      sincronizar o hacer la versión de escritorio.
 - [ ] Distribución: TestFlight (Apple Developer, 99 USD/año) y/o Google
       Play (25 USD, pago único).
 

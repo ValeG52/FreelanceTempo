@@ -5,7 +5,7 @@
 // "import X from" trae lo que el otro archivo exporta por defecto;
 // "import { A, B } from" trae cosas puntuales por su nombre
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { Paquete, Empresa, BloqueHorario, JornadaLaboral } from "../type/index";
+import { Paquete, Empresa, BloqueHorario, JornadaLaboral, DatosApp } from "../type/index";
 
 // const = variable que no se puede reasignar (como readonly)
 const KEY_PAQUETES = "paquetes";
@@ -100,4 +100,32 @@ export async function guardarJornadaYBloques(jornada: JornadaLaboral, bloques: B
     [KEY_JORNADA, JSON.stringify(jornada)],
     [KEY_BLOQUES, JSON.stringify(bloques)],
   ]);
+}
+
+// RESPALDO (todos los datos juntos)
+
+// Lee todo lo guardado de una vez (para armar un respaldo)
+export async function obtenerTodo(): Promise<DatosApp> {
+  const [paquetes, empresas, bloques, jornada] = await Promise.all([
+    obtenerPaquetes(),
+    obtenerEmpresas(),
+    obtenerBloques(),
+    obtenerJornada(),
+  ]);
+  return { paquetes, empresas, bloques, jornada };
+}
+
+// Reemplaza TODOS los datos por los de un respaldo, en una sola operación.
+// Si el respaldo no tiene jornada, se borra la guardada (vuelve a la de por defecto).
+export async function reemplazarTodo(datos: DatosApp) {
+  await AsyncStorage.multiSet([
+    [KEY_PAQUETES, JSON.stringify(datos.paquetes)],
+    [KEY_EMPRESAS, JSON.stringify(datos.empresas)],
+    [KEY_BLOQUES, JSON.stringify(datos.bloques)],
+  ]);
+  if (datos.jornada) {
+    await AsyncStorage.setItem(KEY_JORNADA, JSON.stringify(datos.jornada));
+  } else {
+    await AsyncStorage.removeItem(KEY_JORNADA);
+  }
 }

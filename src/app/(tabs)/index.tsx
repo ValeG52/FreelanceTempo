@@ -186,8 +186,8 @@ const Hoy = () => {
       accion={
         <BotonIcono
           icono={{ ios: "gearshape.fill", android: "settings", web: "settings" }}
-          etiquetaAccesible="Jornada laboral"
-          onPress={() => router.push("/jornada")} // al tocar: ir a la pantalla de jornada
+          etiquetaAccesible="Ajustes"
+          onPress={() => router.push("/ajustes")} // al tocar: ir a Ajustes (jornada y respaldo)
         />
       }
     >
